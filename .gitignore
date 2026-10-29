@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs & runtime caches
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.tsbuildinfo
+.vite/
+
+# Playwright & Verification temporary state
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+.playwright-cli/
+.scratch/
+
+# Agent local state (keep skills & AGENTS.md tracked if desired, ignore temp caches)
+.claude/
+
+# Editor & OS files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
