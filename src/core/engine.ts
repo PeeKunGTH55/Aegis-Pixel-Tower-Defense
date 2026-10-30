@@ -134,7 +134,7 @@ export function getHeroSkillCooldownTicks(
   }
   const starReduction = Math.min(0.32, (Math.max(1, stars) - 1) * 0.08);
   const stormBonus =
-    synergies && isSynergyActive(synergies, "STORM") ? 0.2 : 0;
+    synergies && isSynergyActive(synergies, "THUNDER") ? 0.2 : 0;
   const totalReduction = Math.min(0.48, starReduction + stormBonus);
   return Math.max(50, Math.round(def.skillCooldownTicks * (1 - totalReduction)));
 }
@@ -736,7 +736,7 @@ export function stepSimulationTick(state: BattleState): BattleState {
   const fxEvents: VisualFxEvent[] = [];
   const stagePathData = getStagePathData(state.config.stageId);
   const frostSynergy = isSynergyActive(state.activeSynergies, "FROST");
-  const stormSynergy = isSynergyActive(state.activeSynergies, "STORM");
+  const stormSynergy = isSynergyActive(state.activeSynergies, "THUNDER");
   const solarSynergy = isSynergyActive(state.activeSynergies, "SOLAR");
 
   if (phase === "PREPARING" && nextTick >= waveCooldownUntilTick && wave > 0) {
@@ -901,7 +901,7 @@ export function stepSimulationTick(state: BattleState): BattleState {
 
     const hasteMultiplier = nextTick < hero.hasteUntilTick ? 0.62 : 1.0;
     const stormSpeedMultiplier =
-      def.element === "STORM" && stormSynergy ? 0.85 : 1.0;
+      def.element === "THUNDER" && stormSynergy ? 0.85 : 1.0;
     const interval = Math.max(
       5,
       Math.round(def.attackIntervalTicks * hasteMultiplier * stormSpeedMultiplier)

@@ -40,6 +40,7 @@ import {
   CommandResult,
   DeployedHero,
   GameCommand,
+  HeroElement,
   HeroId,
   HeroRarity,
 } from "../src/core/types";
@@ -116,11 +117,17 @@ function runFormalSuite(injectFault: boolean): void {
   const t0 = performance.now();
 
   // =========================================================================
-  // Invariant 1: 30-Hero Distribution, Loadout Cap (<= 6) & Account Tutorial Idempotency
+  // Invariant 1: 40-Hero Distribution, 7 Elements, Loadout Cap (<= 6) & Account Tutorial Idempotency
   // =========================================================================
-  assert(ALL_HERO_IDS.length === 30, `Expected exactly 30 heroes in ALL_HERO_IDS, got ${ALL_HERO_IDS.length}`);
+  assert(ALL_HERO_IDS.length === 40, `Expected exactly 40 heroes in ALL_HERO_IDS, got ${ALL_HERO_IDS.length}`);
   const uniqueHeroIds = new Set(ALL_HERO_IDS);
-  assert(uniqueHeroIds.size === 30, "Duplicate hero IDs found in ALL_HERO_IDS");
+  assert(uniqueHeroIds.size === 40, "Duplicate hero IDs found in ALL_HERO_IDS");
+
+  assert(ALL_ELEMENTS.length === 7, `Expected exactly 7 elements in ALL_ELEMENTS, got ${ALL_ELEMENTS.length}`);
+  const expectedElements = ["FLAME", "WATER", "EARTH", "THUNDER", "FROST", "SOLAR", "DARK"] as const;
+  for (const el of expectedElements) {
+    assert(ALL_ELEMENTS.includes(el), `Element ${el} missing in ALL_ELEMENTS`);
+  }
 
   const rarityCounts: Record<HeroRarity, number> = {
     COMMON: 0,
@@ -129,11 +136,23 @@ function runFormalSuite(injectFault: boolean): void {
     ULTRA_RARE: 0,
   };
 
+  const elementCounts: Record<HeroElement, number> = {
+    FLAME: 0,
+    WATER: 0,
+    EARTH: 0,
+    THUNDER: 0,
+    FROST: 0,
+    SOLAR: 0,
+    DARK: 0,
+  };
+
   for (const heroId of ALL_HERO_IDS) {
     const def = HERO_CATALOG[heroId];
     assert(Boolean(def), `Hero definition missing for ${heroId}`);
     assert(def.id === heroId, `Hero definition ID mismatch for ${heroId}`);
+    assert(ALL_ELEMENTS.includes(def.element), `Hero ${heroId} has invalid element ${def.element}`);
     rarityCounts[def.rarity]++;
+    elementCounts[def.element]++;
 
     if (def.rarity === "COMMON" || def.rarity === "UNCOMMON") {
       assert(def.skillEffect === null, `Passive hero ${heroId} (${def.rarity}) must have skillEffect === null`);
@@ -146,33 +165,46 @@ function runFormalSuite(injectFault: boolean): void {
       assert(def.skillDescThai !== null, `Active hero ${heroId} (${def.rarity}) must have skillDescThai !== null`);
       assert(def.skillCooldownTicks > 0, `Active hero ${heroId} (${def.rarity}) must have skillCooldownTicks > 0`);
     }
-    totalSamples += 5;
+    totalSamples += 6;
   }
 
-  assert(rarityCounts.COMMON === 10, `Expected exactly 10 COMMON heroes, got ${rarityCounts.COMMON}`);
-  assert(rarityCounts.UNCOMMON === 9, `Expected exactly 9 UNCOMMON heroes, got ${rarityCounts.UNCOMMON}`);
-  assert(rarityCounts.RARE === 7, `Expected exactly 7 RARE heroes, got ${rarityCounts.RARE}`);
-  assert(rarityCounts.ULTRA_RARE === 4, `Expected exactly 4 ULTRA_RARE heroes, got ${rarityCounts.ULTRA_RARE}`);
-  totalSamples += 5;
+  assert(rarityCounts.COMMON === 14, `Expected exactly 14 COMMON heroes, got ${rarityCounts.COMMON}`);
+  assert(rarityCounts.UNCOMMON === 12, `Expected exactly 12 UNCOMMON heroes, got ${rarityCounts.UNCOMMON}`);
+  assert(rarityCounts.RARE === 9, `Expected exactly 9 RARE heroes, got ${rarityCounts.RARE}`);
+  assert(rarityCounts.ULTRA_RARE === 5, `Expected exactly 5 ULTRA_RARE heroes, got ${rarityCounts.ULTRA_RARE}`);
 
-  // Loadout slots bounds [2, 6]
+  for (const el of ALL_ELEMENTS) {
+    assert(elementCounts[el] > 0, `Element ${el} has no heroes assigned`);
+  }
+  totalSamples += 12;
+
+  // Loadout slots bounds [1, 6] & mapping (Lv.1 -> 1, Lv.2 -> 2, ..., Lv.6+ -> 6)
   for (let lvl = -5; lvl <= 20; lvl++) {
     const cap = getUnlockedLoadoutSlots(lvl);
-    assert(cap >= 2 && cap <= MAX_LOADOUT_SLOTS, `Invalid slot cap ${cap} for level ${lvl}`);
+    const expected = Math.min(6, Math.max(1, Math.floor(lvl)));
+    assert(cap === expected, `Slot cap mapping mismatch for level ${lvl}: expected ${expected}, got ${cap}`);
+    assert(cap >= 1 && cap <= MAX_LOADOUT_SLOTS, `Invalid slot cap ${cap} for level ${lvl}`);
     assert(cap <= 6, `Loadout slot cap must never exceed 6 (got ${cap})`);
-    totalSamples++;
+    totalSamples += 3;
   }
 
-  // Account Tutorial Idempotency
-  const freshProfile = createDefaultProfile("Commander");
+  // Account Tutorial & Lv.1 Start
+  const freshProfile = createDefaultProfile("TestUser");
+  assert(freshProfile.playerLevel === 1, "New account must start at playerLevel === 1");
+  assert(freshProfile.loadout.length === 1, "Default loadout length must match Lv.1 slot cap (1)");
+  assert(
+    freshProfile.loadout.length <= getUnlockedLoadoutSlots(freshProfile.playerLevel),
+    "Default loadout length must not exceed unlocked slots for playerLevel"
+  );
   assert(!freshProfile.tutorialCompleted, "Default profile tutorial must start incomplete");
+  assert(freshProfile.tutorialStep === 1, "Default tutorial step must start at 1");
   const startingCoins = freshProfile.metaCoins;
 
   const tut1 = completeAccountTutorial(freshProfile);
   assert(tut1.tutorialCompleted === true, "Tutorial must be marked completed after first completion");
   assert(tut1.tutorialStep === 0, "Tutorial step must reset to 0 upon completion");
   assert(tut1.metaCoins === startingCoins + 200, "Tutorial completion must award exactly +200 Meta Coins");
-  totalSamples += 3;
+  totalSamples += 8;
 
   // Complete tutorial again (idempotent check)
   const tut2 = completeAccountTutorial(tut1);
@@ -187,7 +219,7 @@ function runFormalSuite(injectFault: boolean): void {
     totalSamples++;
   }
 
-  // Loadout toggle bounds fuzzing across all 30 heroes
+  // Loadout toggle bounds fuzzing across all 40 heroes
   const allOwnedRecord: Record<HeroId, number> = {} as Record<HeroId, number>;
   for (const id of ALL_HERO_IDS) {
     allOwnedRecord[id] = 1;
@@ -196,7 +228,7 @@ function runFormalSuite(injectFault: boolean): void {
   for (let lvl = 1; lvl <= 10; lvl++) {
     const cap = getUnlockedLoadoutSlots(lvl);
     let prof = {
-      ...createDefaultProfile(),
+      ...createDefaultProfile("TestUser"),
       playerLevel: lvl,
       ownedHeroes: allOwnedRecord,
       loadout: ["archer"] as readonly HeroId[],
@@ -205,7 +237,7 @@ function runFormalSuite(injectFault: boolean): void {
       prof = toggleHeroInLoadout(prof, id).profile;
       assert(prof.loadout.length >= 1 && prof.loadout.length <= cap, "Loadout length invariant violated");
       assert(prof.loadout.length <= 6, "Loadout cap must never exceed 6");
-      totalSamples++;
+      totalSamples += 2;
     }
 
     const cantRemoveLast = toggleHeroInLoadout({ ...prof, loadout: ["archer"] }, "archer");
@@ -214,7 +246,7 @@ function runFormalSuite(injectFault: boolean): void {
   }
 
   // =========================================================================
-  // Invariant 2: 4-Tier Rarity Deploy Caps 6/4/2/1 across all 30 Heroes
+  // Invariant 2: 4-Tier Rarity Deploy Caps 6/4/2/1 across all 40 Heroes
   // =========================================================================
   const expectedCaps: Record<HeroRarity, number> = {
     COMMON: 6,
@@ -243,7 +275,7 @@ function runFormalSuite(injectFault: boolean): void {
         seed: 202610,
         stageId: 1,
         mode: "STAGE",
-        playerLevel: 5,
+        playerLevel: 6,
         loadout: [heroId],
         heroStars: { [heroId]: 1 } as any,
       }),
@@ -438,14 +470,14 @@ function runFormalSuite(injectFault: boolean): void {
   assert(frostArcherDmgSolar === Math.round(nonFlameDmgBase * 1.2), "SOLAR synergy must increase damage by exactly +20%");
   totalSamples += 3;
 
-  // STORM Synergy (2+ STORM units -> -20% cooldown)
-  // Thunderlord (STORM) + Tempestarchon (STORM)
-  const stormSyn = computeActiveSynergies([{ heroId: "thunderlord" }, { heroId: "tempestarchon" }]);
-  const stormBonus = stormSyn.find((s) => s.element === "STORM")!;
-  assert(stormBonus.active && stormBonus.deployedUnits === 2, "2 STORM units must activate STORM synergy");
-  const baseStormCd = getHeroSkillCooldownTicks("thunderlord", 1, emptySyn);
-  const buffedStormCd = getHeroSkillCooldownTicks("thunderlord", 1, stormSyn);
-  assert(buffedStormCd < baseStormCd, "STORM synergy must decrease hero skill cooldown ticks");
+  // THUNDER Synergy (2+ THUNDER units -> -20% cooldown)
+  // Thunderlord (THUNDER) + Tempestarchon (THUNDER)
+  const thunderSyn = computeActiveSynergies([{ heroId: "thunderlord" }, { heroId: "tempestarchon" }]);
+  const thunderBonus = thunderSyn.find((s) => s.element === "THUNDER")!;
+  assert(thunderBonus.active && thunderBonus.deployedUnits === 2, "2 THUNDER units must activate THUNDER synergy");
+  const baseThunderCd = getHeroSkillCooldownTicks("thunderlord", 1, emptySyn);
+  const buffedThunderCd = getHeroSkillCooldownTicks("thunderlord", 1, thunderSyn);
+  assert(buffedThunderCd < baseThunderCd, "THUNDER synergy must decrease hero skill cooldown ticks");
   totalSamples += 3;
 
   // FROST Synergy (2+ FROST units -> active)
@@ -454,11 +486,25 @@ function runFormalSuite(injectFault: boolean): void {
   assert(frostBonusObj.active && frostBonusObj.deployedUnits === 2, "2 FROST units must activate FROST synergy");
   totalSamples++;
 
-  // 3. Passive Hero HERO_HAS_NO_SKILL Guard (10 COMMON + 9 UNCOMMON = 19 heroes)
+  // WATER, EARTH, DARK Synergies (2+ units -> active)
+  const waterSyn = computeActiveSynergies([{ heroId: "tidecaller" }, { heroId: "hydramage" }]);
+  const waterBonus = waterSyn.find((s) => s.element === "WATER")!;
+  assert(waterBonus.active && waterBonus.deployedUnits === 2, "2 WATER units must activate WATER synergy");
+
+  const earthSyn = computeActiveSynergies([{ heroId: "stoneguard" }, { heroId: "golemcrusher" }]);
+  const earthBonus = earthSyn.find((s) => s.element === "EARTH")!;
+  assert(earthBonus.active && earthBonus.deployedUnits === 2, "2 EARTH units must activate EARTH synergy");
+
+  const darkSyn = computeActiveSynergies([{ heroId: "shadowimp" }, { heroId: "darklock" }]);
+  const darkBonus = darkSyn.find((s) => s.element === "DARK")!;
+  assert(darkBonus.active && darkBonus.deployedUnits === 2, "2 DARK units must activate DARK synergy");
+  totalSamples += 3;
+
+  // 3. Passive Hero HERO_HAS_NO_SKILL Guard (14 COMMON + 12 UNCOMMON = 26 heroes)
   const passiveHeroes = ALL_HERO_IDS.filter(
     (id) => HERO_CATALOG[id].rarity === "COMMON" || HERO_CATALOG[id].rarity === "UNCOMMON"
   );
-  assert(passiveHeroes.length === 19, `Expected 19 passive heroes, got ${passiveHeroes.length}`);
+  assert(passiveHeroes.length === 26, `Expected 26 passive heroes, got ${passiveHeroes.length}`);
 
   for (const passiveId of passiveHeroes) {
     const tile = getValidTilesForHero(1, passiveId)[0]!;
@@ -467,7 +513,7 @@ function runFormalSuite(injectFault: boolean): void {
         seed: 202610,
         stageId: 1,
         mode: "STAGE",
-        playerLevel: 5,
+        playerLevel: 6,
         loadout: [passiveId],
         heroStars: { [passiveId]: 1 } as any,
       }),
@@ -502,11 +548,11 @@ function runFormalSuite(injectFault: boolean): void {
     totalSamples += 3;
   }
 
-  // 4. Active Hero Cooldown, Silence Guard, & Sanctuary Cleanse (7 RARE + 4 ULTRA_RARE = 11 heroes)
+  // 4. Active Hero Cooldown, Silence Guard, & Sanctuary Cleanse (9 RARE + 5 ULTRA_RARE = 14 heroes)
   const activeHeroes = ALL_HERO_IDS.filter(
     (id) => HERO_CATALOG[id].rarity === "RARE" || HERO_CATALOG[id].rarity === "ULTRA_RARE"
   );
-  assert(activeHeroes.length === 11, `Expected 11 active heroes, got ${activeHeroes.length}`);
+  assert(activeHeroes.length === 14, `Expected 14 active heroes, got ${activeHeroes.length}`);
 
   for (const activeId of activeHeroes) {
     const def = HERO_CATALOG[activeId];
@@ -521,7 +567,7 @@ function runFormalSuite(injectFault: boolean): void {
         seed: 202610,
         stageId: 1,
         mode: "STAGE",
-        playerLevel: 5,
+        playerLevel: 6,
         loadout: [activeId, "archer"],
         heroStars: { [activeId]: 1, archer: 1 } as any,
       }),
@@ -622,9 +668,9 @@ function runFormalSuite(injectFault: boolean): void {
   }
 
   // =========================================================================
-  // Invariant 5: 20-Pull ULTRA_RARE Guarantee & 10-Pull RARE+ Guarantee across the 30-Hero Pool
+  // Invariant 5: 20-Pull ULTRA_RARE Guarantee & 10-Pull RARE+ Guarantee across the 40-Hero Pool
   // =========================================================================
-  let gachaProf = { ...createDefaultProfile(), metaCoins: 1000 * GACHA_PULL_COST };
+  let gachaProf = { ...createDefaultProfile("GachaTester"), metaCoins: 1000 * GACHA_PULL_COST };
   let gachaSeed = 1337;
   let totalPulls = 0;
   const pulledRarities = new Set<HeroRarity>();
@@ -638,7 +684,7 @@ function runFormalSuite(injectFault: boolean): void {
       const out = pullGachaWithSeed(gachaProf, gachaSeed);
       assert(out.ok && out.profile.metaCoins >= 0, "Gacha pull must succeed and metaCoins must be non-negative");
       assert(Boolean(out.pulledHeroId), "Gacha pull must return a pulledHeroId");
-      assert(ALL_HERO_IDS.includes(out.pulledHeroId!), `Pulled hero ${out.pulledHeroId} not in 30-hero catalog`);
+      assert(ALL_HERO_IDS.includes(out.pulledHeroId!), `Pulled hero ${out.pulledHeroId} not in 40-hero catalog`);
       assert(
         HERO_CATALOG[out.pulledHeroId!].rarity === out.pulledRarity,
         `Pulled hero rarity mismatch for ${out.pulledHeroId}`
@@ -668,7 +714,7 @@ function runFormalSuite(injectFault: boolean): void {
       const outBatch = pullGachaBatchWithSeed(gachaProf, 10, gachaSeed);
       assert(outBatch.ok && outBatch.profile.metaCoins >= 0, "Batch pull must succeed and metaCoins must be non-negative");
       for (const item of outBatch.results) {
-        assert(ALL_HERO_IDS.includes(item.heroId), `Batch pulled hero ${item.heroId} not in 30-hero catalog`);
+        assert(ALL_HERO_IDS.includes(item.heroId), `Batch pulled hero ${item.heroId} not in 40-hero catalog`);
         assert(
           HERO_CATALOG[item.heroId].rarity === item.rarity,
           `Batch pulled hero rarity mismatch for ${item.heroId}`
@@ -688,14 +734,14 @@ function runFormalSuite(injectFault: boolean): void {
   }
 
   assert(pulledRarities.size === 4, "All 4 rarities must be pulled across 1,000 pulls");
-  assert(pulledHeroIds.size >= 25, `Expected diverse hero pulls across 30-hero pool (got ${pulledHeroIds.size})`);
+  assert(pulledHeroIds.size >= 35, `Expected diverse hero pulls across 40-hero pool (got ${pulledHeroIds.size})`);
   totalSamples += 2;
 
   // Insufficient coin checks
-  const brokeProf = { ...createDefaultProfile(), metaCoins: 50 };
+  const brokeProf = { ...createDefaultProfile("BrokeUser"), metaCoins: 50 };
   const brokePull = pullGachaWithSeed(brokeProf, gachaSeed);
   assert(!brokePull.ok && brokePull.reason === "INSUFFICIENT_COINS", "Expected INSUFFICIENT_COINS for single pull");
-  const brokeBatch = pullGachaBatchWithSeed({ ...createDefaultProfile(), metaCoins: 900 }, 10, gachaSeed);
+  const brokeBatch = pullGachaBatchWithSeed({ ...createDefaultProfile("BrokeUser"), metaCoins: 900 }, 10, gachaSeed);
   assert(!brokeBatch.ok && brokeBatch.reason === "INSUFFICIENT_COINS", "Expected INSUFFICIENT_COINS for 10-pull batch");
   totalSamples += 2;
 
@@ -708,7 +754,7 @@ function runFormalSuite(injectFault: boolean): void {
     seed: 202610,
     stageId: 1,
     mode: "STAGE",
-    playerLevel: 5,
+    playerLevel: 6,
     loadout: ["paladin", "chronoweaver", "thunderlord", "frostmage", "pyromancer", "archer"],
     heroStars: all5Stars,
   };

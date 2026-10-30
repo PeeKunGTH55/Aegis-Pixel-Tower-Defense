@@ -58,7 +58,7 @@ export function applyStageVictoryUnlocks(
   return next;
 }
 
-export function createDefaultProfile(username = "Commander"): PlayerProfile {
+export function createDefaultProfile(username: string): PlayerProfile {
   const initialOwned: Record<HeroId, number> = {} as Record<HeroId, number>;
   for (const id of ALL_HERO_IDS) {
     initialOwned[id] = 0;
@@ -72,7 +72,7 @@ export function createDefaultProfile(username = "Commander"): PlayerProfile {
     username,
     tutorialCompleted: false,
     tutorialStep: 1,
-    playerLevel: 2,
+    playerLevel: 1,
     xp: 0,
     metaCoins: 400,
     pityCounter: 0,
@@ -82,7 +82,7 @@ export function createDefaultProfile(username = "Commander"): PlayerProfile {
       "1:EASY": true,
     },
     ownedHeroes: initialOwned,
-    loadout: ["archer", "pyromancer", "frostmage"],
+    loadout: ["archer"],
     leaderboard: [
       {
         id: "seed-entry-1",
@@ -329,11 +329,11 @@ export function awardBattleCompletion(
       diffMult
   );
   const earnedXp = Math.round(
-    ((params.victory ? 120 : 40) + verifiedWave * 15) * diffMult
+    ((params.victory ? 150 : 50) + verifiedWave * 15) * diffMult
   );
   const totalXp = profile.xp + earnedXp;
   const levelUps = Math.floor(totalXp / 150);
-  const nextLevel = Math.min(5, profile.playerLevel + levelUps);
+  const nextLevel = Math.min(6, profile.playerLevel + levelUps);
   const remainingXp = totalXp % 150;
 
   let nextUnlockedMap = profile.unlockedStageDifficulties;

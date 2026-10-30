@@ -74,13 +74,13 @@ function escapeHtml(raw: string): string {
 function loadGlobalLeaderboard(): PlayerProfile["leaderboard"] {
   try {
     const raw = localStorage.getItem(GLOBAL_LEADERBOARD_KEY);
-    if (!raw) return createDefaultProfile().leaderboard;
+    if (!raw) return createDefaultProfile("Guest").leaderboard;
     const parsed = JSON.parse(raw) as PlayerProfile["leaderboard"];
     return Array.isArray(parsed) && parsed.length > 0
       ? parsed
-      : createDefaultProfile().leaderboard;
+      : createDefaultProfile("Guest").leaderboard;
   } catch {
-    return createDefaultProfile().leaderboard;
+    return createDefaultProfile("Guest").leaderboard;
   }
 }
 
@@ -111,7 +111,7 @@ function saveAccountsMap(map: Record<string, StoredAccountRecord>): void {
 }
 
 function normalizeLoadedProfile(raw: PlayerProfile): PlayerProfile {
-  const base = createDefaultProfile(raw.username || "Commander");
+  const base = createDefaultProfile(raw.username || "Player");
   const globalLb = loadGlobalLeaderboard();
   const mergedLb = [...globalLb];
   for (const item of raw.leaderboard ?? []) {
@@ -136,26 +136,19 @@ function normalizeLoadedProfile(raw: PlayerProfile): PlayerProfile {
   };
 }
 
-function loadOrInitActiveProfile(): PlayerProfile {
-  const accounts = loadAccountsMap();
-  const activeUser = localStorage.getItem(ACTIVE_USER_KEY) || "Commander";
-  const existing = accounts[activeUser];
-  if (existing && existing.profile) {
-    return normalizeLoadedProfile(existing.profile);
-  }
-  const fresh = createDefaultProfile(activeUser);
-  accounts[activeUser] = {
-    username: activeUser,
-    password: "",
-    profile: fresh,
-  };
-  saveAccountsMap(accounts);
+function loadExistingSessionProfile(): PlayerProfile | null {
   try {
-    localStorage.setItem(ACTIVE_USER_KEY, activeUser);
+    const activeUser = localStorage.getItem(ACTIVE_USER_KEY);
+    if (!activeUser) return null;
+    const accounts = loadAccountsMap();
+    const existing = accounts[activeUser];
+    if (existing && existing.profile) {
+      return normalizeLoadedProfile(existing.profile);
+    }
+    return null;
   } catch {
-    // ignore
+    return null;
   }
-  return fresh;
 }
 
 function persistProfile(profile: PlayerProfile): void {
@@ -280,17 +273,22 @@ class TowerDefenseController {
   private lastHudStructureKey = "";
 
   constructor(scene: BattleScene) {
-    this.profile = loadOrInitActiveProfile();
+    const existingSession = loadExistingSessionProfile();
+    if (existingSession) {
+      this.profile = existingSession;
+      this.isAuthenticated = true;
+      this.activeModal = this.profile.tutorialCompleted ? null : "TUTORIAL";
+    } else {
+      this.profile = createDefaultProfile("");
+      this.isAuthenticated = false;
+      this.activeModal = "ACCOUNT";
+    }
     this.battleScene = scene;
     this.selectedHeroToDeploy = this.profile.loadout[0] ?? "archer";
     this.inspectedHeroId = this.profile.loadout[0] ?? "frostmage";
     this.battleScene.setActiveHeroToDeploy(this.selectedHeroToDeploy);
     this.battleScene.setSelectedTile(this.selectedTile.col, this.selectedTile.row);
     this.battleState = this.buildNewBattleState(20261030);
-
-    if (!this.profile.tutorialCompleted) {
-      this.activeModal = "TUTORIAL";
-    }
 
     this.battleScene.setOnTileClick((col, row) => {
       this.selectTileOrDeploy(col, row);
@@ -836,14 +834,17 @@ class TowerDefenseController {
     topEl.innerHTML = `
       <div class="top-bar-card">
         <div class="top-brand-row">
-          <h1 style="font-family:'Press Start 2P',monospace; font-size:14px; color:var(--accent-amber); letter-spacing:-0.02em;">
-            ELEMENTAL RIFT TD
-          </h1>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <img src="/favicon.svg" alt="Elemental Rift Crest" style="width:24px; height:24px; image-rendering:pixelated; display:block;" />
+            <h1 style="font-family:'Press Start 2P',monospace; font-size:14px; color:var(--accent-amber); letter-spacing:-0.02em;">
+              ELEMENTAL RIFT TD
+            </h1>
+          </div>
           <span data-testid="account-badge" class="num" style="background:var(--bg-elevated); border:1px solid var(--border-subtle); border-radius:6px; padding:3px 8px; font-size:11px; color:var(--text-primary);">
-            ${this.isAuthenticated ? `<strong>${safeUsername}</strong>` : `<strong style="color:var(--accent-rose);">Guest</strong>`}
+            ${this.isAuthenticated ? `<strong>${safeUsername}</strong>` : `<strong style="color:var(--accent-rose);">ยังไม่ได้ Login</strong>`}
           </span>
           <span data-testid="player-level-badge" class="num" style="background:var(--bg-elevated); border:1px solid var(--border-focus); border-radius:6px; padding:3px 8px; font-size:11px; font-weight:700;">
-            Lv.${this.profile.playerLevel} (${this.profile.loadout.length}/${unlockedSlots})
+            Lv.${this.profile.playerLevel} (Slots ${this.profile.loadout.length}/${unlockedSlots} | Max ${MAX_LOADOUT_SLOTS})
           </span>
           <span data-testid="meta-coins-badge" class="num" style="background:var(--bg-elevated); border:1px solid var(--accent-sky); border-radius:6px; padding:3px 8px; font-size:11px; color:var(--accent-sky); font-weight:700;">
             Coins: ${this.profile.metaCoins}
@@ -858,7 +859,7 @@ class TowerDefenseController {
             สุ่ม Gacha (${this.profile.pityCounter}/${ULTRA_RARE_PITY_THRESHOLD})
           </button>
           <button data-testid="btn-modal-roster" id="btn-modal-roster" class="btn-touch" style="background:${this.activeModal === "ROSTER" ? "var(--accent-amber)" : "var(--bg-elevated)"}; color:${this.activeModal === "ROSTER" ? "#090d16" : "var(--text-primary)"};">
-            จัดทีม (30 Heroes)
+            จัดทีม (40 Heroes)
           </button>
           <button data-testid="btn-modal-leaderboard" id="btn-modal-leaderboard" class="btn-touch" style="background:${this.activeModal === "LEADERBOARD" ? "var(--accent-amber)" : "var(--bg-elevated)"}; color:${this.activeModal === "LEADERBOARD" ? "#090d16" : "var(--text-primary)"};">
             Leaderboard (${this.profile.leaderboard.length})
@@ -885,17 +886,6 @@ class TowerDefenseController {
           <span data-testid="hud-hp">HP <strong style="color:${st.baseHp > 8 ? "#10b981" : "#f43f5e"};">${st.baseHp}/${st.maxBaseHp}</strong></span>
           <span data-testid="hud-score">SCORE <strong style="color:var(--accent-sky);">${st.score}</strong></span>
           <span data-testid="hud-phase" style="padding:2px 6px; background:var(--bg-elevated); border-radius:4px; font-size:10px;">${st.phase}</span>
-        </div>
-
-        <div data-testid="synergy-bar" class="mobile-hide-synergy" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-          ${st.activeSynergies
-            .map((syn) => {
-              const def = ELEMENT_SYNERGY_DEFS[syn.element];
-              return `<span data-testid="synergy-pill-${syn.element}" class="num" title="${def.descThai}" style="font-size:11px; padding:3px 8px; border-radius:4px; border:1px solid ${syn.active ? def.colorHex : "var(--border-subtle)"}; background:${syn.active ? "var(--bg-elevated)" : "var(--bg-void)"}; color:${syn.active ? def.colorHex : "var(--text-muted)"}; font-weight:${syn.active ? "700" : "500"};">
-                ${syn.element} ${syn.deployedUnits}/2 ${syn.active ? "ACTIVE" : ""}
-              </span>`;
-            })
-            .join("")}
         </div>
 
         <div class="wave-controls-strip">
@@ -1049,7 +1039,7 @@ class TowerDefenseController {
       if (!isUnlocked) {
         slotsHtml.push(`
           <div data-testid="loadout-slot-${slotIdx}" style="background:var(--bg-surface); border:1px dashed var(--border-subtle); border-radius:12px; padding:12px; color:var(--text-muted); font-size:12px; display:flex; align-items:center; justify-content:center; text-align:center;">
-            ช่องที่ ${slotIdx + 1} ล็อก (ปลดที่ Lv.${slotIdx})
+            ช่องที่ ${slotIdx + 1} ล็อก (ปลดที่ Lv.${slotIdx + 1})
           </div>
         `);
         continue;
@@ -1152,7 +1142,7 @@ class TowerDefenseController {
               </div>
               <div style="font-size:13px; color:var(--text-secondary); margin-top:3px;">${def.titleThai}</div>
               <div style="font-size:11px; color:${synDef.colorHex}; margin-top:4px;">
-                บัฟธาตุประสาน (${synDef.name}): ${synDef.descThai}
+                เอกลักษณ์${synDef.name}: ${synDef.descThai}
               </div>
             </div>
           </div>
@@ -1241,7 +1231,7 @@ class TowerDefenseController {
         </div>
       `;
     } else if (this.activeModal === "GACHA") {
-      title = "ตู้สุ่ม Elemental Rift Gacha (30 Heroes · การันตี 20 โรล = ULTRA RARE 100%)";
+      title = "ตู้สุ่ม Elemental Rift Gacha (40 Heroes · การันตี 20 โรล = ULTRA RARE 100%)";
       bodyHtml = `
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background:var(--bg-elevated); border:1px solid var(--border-subtle); border-radius:10px; padding:14px;">
           <div>
@@ -1251,7 +1241,7 @@ class TowerDefenseController {
               · การันตี ULTRA RARE ในอีก <strong style="color:var(--accent-amber);">${ULTRA_RARE_PITY_THRESHOLD - this.profile.pityCounter}</strong> โรล
             </div>
             <div class="num" style="font-size:12px; color:var(--text-secondary);">
-              COMMON (10 ตัว · 55% · Passive) · UNCOMMON (9 ตัว · 28% · Passive) · RARE (7 ตัว · 13% · Active Skill) · ULTRA RARE (4 ตัว · 4% · Ultimate Skill)
+              COMMON (14 ตัว · 55% · Passive) · UNCOMMON (12 ตัว · 28% · Passive) · RARE (9 ตัว · 13% · Active Skill) · ULTRA RARE (5 ตัว · 4% · Ultimate Skill)
             </div>
           </div>
           <div style="display:flex; gap:10px; flex-wrap:wrap;">
@@ -1320,7 +1310,7 @@ class TowerDefenseController {
             ${(["ALL", "COMMON", "UNCOMMON", "RARE", "ULTRA_RARE"] as const)
               .map(
                 (r) => `<button data-testid="filter-rarity-${r}" class="btn-filter-rarity btn-touch num" data-rarity="${r}" style="min-height:32px; padding:4px 10px; font-size:11px; background:${this.rosterRarityFilter === r ? "var(--accent-amber)" : "var(--bg-elevated)"}; color:${this.rosterRarityFilter === r ? "#090d16" : "var(--text-primary)"};">
-                  ${r === "ALL" ? "ทุก Rarity (30)" : r}
+                  ${r === "ALL" ? "ทุก Rarity (40)" : r}
                 </button>`
               )
               .join("")}
@@ -1425,7 +1415,7 @@ class TowerDefenseController {
               </div>
               <div class="num" style="font-size:13px; color:var(--text-primary); margin-top:8px; display:flex; gap:16px; flex-wrap:wrap;">
                 <span>Meta Coins: <strong style="color:var(--accent-sky);">${this.profile.metaCoins}</strong></span>
-                <span>Hero ที่ปลดล็อก: <strong style="color:var(--accent-emerald);">${ownedCount}/30 ตัว</strong></span>
+                <span>Hero ที่ปลดล็อก: <strong style="color:var(--accent-emerald);">${ownedCount}/40 ตัว</strong></span>
                 <span>ด่านที่ปลดล็อก: <strong>${unlockedDiffCount}/30 ระดับ</strong></span>
                 <span>คะแนนสูงสุด: <strong style="color:#fde047;">${bestPersonalScore} PTS</strong></span>
               </div>

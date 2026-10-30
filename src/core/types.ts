@@ -2,7 +2,14 @@ export type DeployCap = 1 | 2 | 4 | 6;
 
 export type HeroRarity = "COMMON" | "UNCOMMON" | "RARE" | "ULTRA_RARE";
 
-export type HeroElement = "FLAME" | "FROST" | "STORM" | "SOLAR";
+export type HeroElement =
+  | "FLAME"
+  | "WATER"
+  | "EARTH"
+  | "THUNDER"
+  | "FROST"
+  | "SOLAR"
+  | "DARK";
 
 export type HeroRole = "SINGLE_DPS" | "AOE_BLAST" | "CROWD_CONTROL" | "SUPPORT_CLEANSE";
 
@@ -25,6 +32,10 @@ export type HeroId =
   | "lightbearer"
   | "ashbomber"
   | "snowguard"
+  | "tidecaller"
+  | "stoneguard"
+  | "shadowimp"
+  | "coralarcher"
   | "pyromancer"
   | "stormcaller"
   | "cryoknight"
@@ -34,6 +45,9 @@ export type HeroId =
   | "volthunter"
   | "sunpriest"
   | "blazeblade"
+  | "golemcrusher"
+  | "darklock"
+  | "hydramage"
   | "frostmage"
   | "thunderlord"
   | "flamewarden"
@@ -41,10 +55,13 @@ export type HeroId =
   | "blizzardwitch"
   | "tempestarchon"
   | "solariseraph"
+  | "tidallord"
+  | "earthshaker"
   | "paladin"
   | "chronoweaver"
   | "vulcanlord"
-  | "borealqueen";
+  | "borealqueen"
+  | "abyssalking";
 
 export type ActiveSkillKind =
   | {
