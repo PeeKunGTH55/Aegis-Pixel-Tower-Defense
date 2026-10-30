@@ -1,6 +1,8 @@
-export type DeployCap = 1 | 2 | 6;
+export type DeployCap = 1 | 2 | 4 | 6;
 
-export type HeroRarity = "COMMON" | "ELITE" | "LEGENDARY";
+export type HeroRarity = "COMMON" | "UNCOMMON" | "RARE" | "ULTRA_RARE";
+
+export type HeroElement = "FLAME" | "FROST" | "STORM" | "SOLAR";
 
 export type HeroRole = "SINGLE_DPS" | "AOE_BLAST" | "CROWD_CONTROL" | "SUPPORT_CLEANSE";
 
@@ -10,9 +12,13 @@ export type TileTerrain = "PATH" | "GROUND" | "HIGH_GROUND";
 
 export type HeroPlacementDomain = "GROUND" | "HIGH_GROUND";
 
+export type StageDifficulty = "EASY" | "MEDIUM" | "HARD";
+
 export type HeroId =
   | "archer"
+  | "frostarcher"
   | "pyromancer"
+  | "stormcaller"
   | "frostmage"
   | "thunderlord"
   | "paladin"
@@ -57,6 +63,7 @@ export interface HeroDefinition {
   readonly name: string;
   readonly titleThai: string;
   readonly rarity: HeroRarity;
+  readonly element: HeroElement;
   readonly role: HeroRole;
   readonly placementDomain: HeroPlacementDomain;
   readonly maxDeployCount: DeployCap;
@@ -77,6 +84,14 @@ export interface HeroDefinition {
     readonly secondary: number;
     readonly accent: number;
   };
+}
+
+export interface ElementalSynergyBonus {
+  readonly element: HeroElement;
+  readonly deployedUnits: number;
+  readonly active: boolean;
+  readonly name: string;
+  readonly descThai: string;
 }
 
 export type EnemyTrait = "NORMAL" | "SWIFT" | "ARMORED" | "HEALER" | "BOSS_SILENCER";
@@ -191,6 +206,7 @@ export interface VisualFxEvent {
 export interface BattleConfig {
   readonly seed: number;
   readonly stageId: number;
+  readonly difficulty?: StageDifficulty;
   readonly mode: BattleMode;
   readonly playerLevel: number;
   readonly loadout: readonly HeroId[];
@@ -215,6 +231,7 @@ export interface BattleState {
   readonly waveCooldownUntilTick: number;
   readonly deployedHeroes: readonly DeployedHero[];
   readonly enemies: readonly EnemySnapshot[];
+  readonly activeSynergies: readonly ElementalSynergyBonus[];
   readonly commandLog: readonly GameCommand[];
   readonly recentEvents: readonly VisualFxEvent[];
 }
@@ -223,6 +240,7 @@ export interface LeaderboardEntry {
   readonly id: string;
   readonly playerName: string;
   readonly stageId: number;
+  readonly difficulty: StageDifficulty;
   readonly waveReached: number;
   readonly score: number;
   readonly skillCasts: number;
@@ -234,11 +252,16 @@ export interface LeaderboardEntry {
 }
 
 export interface PlayerProfile {
+  readonly username: string;
+  readonly tutorialCompleted: boolean;
+  readonly tutorialStep: number;
   readonly playerLevel: number;
   readonly xp: number;
   readonly metaCoins: number;
   readonly pityCounter: number;
+  readonly rarePityCounter: number;
   readonly unlockedStages: number;
+  readonly unlockedStageDifficulties: Readonly<Record<string, boolean>>;
   readonly ownedHeroes: Readonly<Record<HeroId, number>>;
   readonly loadout: readonly HeroId[];
   readonly leaderboard: readonly LeaderboardEntry[];

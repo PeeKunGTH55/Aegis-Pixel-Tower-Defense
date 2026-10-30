@@ -1,27 +1,82 @@
-import { ALL_HERO_IDS, getUnlockedLoadoutSlots, HERO_CATALOG } from "./catalog";
+import {
+  ALL_HERO_IDS,
+  DIFFICULTY_MULTIPLIERS,
+  getUnlockedLoadoutSlots,
+  HERO_CATALOG,
+} from "./catalog";
 import { replaySimulation } from "./engine";
 import { nextRng } from "./prng";
 import {
   BattleConfig,
   GameCommand,
   HeroId,
+  HeroRarity,
   LeaderboardEntry,
   PlayerProfile,
+  StageDifficulty,
 } from "./types";
 
 export const GACHA_PULL_COST = 100;
-export const LEGENDARY_PITY_THRESHOLD = 10;
+export const RARE_PITY_THRESHOLD = 10;
+export const ULTRA_RARE_PITY_THRESHOLD = 20;
+export const LEGENDARY_PITY_THRESHOLD = ULTRA_RARE_PITY_THRESHOLD;
 
-export function createDefaultProfile(): PlayerProfile {
+export function stageDifficultyKey(
+  stageId: number,
+  difficulty: StageDifficulty
+): string {
+  return `${stageId}:${difficulty}`;
+}
+
+export function isStageDifficultyUnlocked(
+  profile: PlayerProfile,
+  stageId: number,
+  difficulty: StageDifficulty
+): boolean {
+  return Boolean(
+    profile.unlockedStageDifficulties[stageDifficultyKey(stageId, difficulty)]
+  );
+}
+
+export function applyStageVictoryUnlocks(
+  unlockedMap: Readonly<Record<string, boolean>>,
+  stageId: number,
+  difficulty: StageDifficulty
+): Readonly<Record<string, boolean>> {
+  const next: Record<string, boolean> = {
+    ...unlockedMap,
+    [stageDifficultyKey(stageId, difficulty)]: true,
+  };
+  if (difficulty === "EASY") {
+    next[stageDifficultyKey(stageId, "MEDIUM")] = true;
+    if (stageId < 10) {
+      next[stageDifficultyKey(stageId + 1, "EASY")] = true;
+    }
+  } else if (difficulty === "MEDIUM") {
+    next[stageDifficultyKey(stageId, "HARD")] = true;
+  }
+  return next;
+}
+
+export function createDefaultProfile(username = "Commander"): PlayerProfile {
   return {
+    username,
+    tutorialCompleted: false,
+    tutorialStep: 1,
     playerLevel: 2,
     xp: 0,
-    metaCoins: 300,
+    metaCoins: 400,
     pityCounter: 0,
+    rarePityCounter: 0,
     unlockedStages: 1,
+    unlockedStageDifficulties: {
+      "1:EASY": true,
+    },
     ownedHeroes: {
       archer: 1,
+      frostarcher: 1,
       pyromancer: 1,
+      stormcaller: 0,
       frostmage: 1,
       thunderlord: 0,
       paladin: 0,
@@ -31,29 +86,31 @@ export function createDefaultProfile(): PlayerProfile {
     leaderboard: [
       {
         id: "seed-entry-1",
-        playerName: "Commander Aria",
+        playerName: "Aria_Vanguard",
         stageId: 1,
-        waveReached: 14,
-        score: 6420,
-        skillCasts: 11,
+        difficulty: "HARD",
+        waveReached: 16,
+        score: 8420,
+        skillCasts: 14,
         seed: 202610,
         loadout: ["archer", "pyromancer", "frostmage", "paladin"],
-        commandCount: 19,
+        commandCount: 22,
         verifiedDeterministic: true,
-        createdAtIso: "2026-10-29T00:00:00.000Z",
+        createdAtIso: "2026-10-30T00:00:00.000Z",
       },
       {
         id: "seed-entry-2",
-        playerName: "Tactician Kael",
+        playerName: "Kael_Riftwalker",
         stageId: 1,
+        difficulty: "MEDIUM",
         waveReached: 12,
-        score: 4890,
-        skillCasts: 7,
+        score: 5190,
+        skillCasts: 9,
         seed: 778899,
         loadout: ["archer", "pyromancer", "frostmage"],
-        commandCount: 14,
+        commandCount: 15,
         verifiedDeterministic: true,
-        createdAtIso: "2026-10-29T00:00:00.000Z",
+        createdAtIso: "2026-10-30T00:00:00.000Z",
       },
     ],
   };
@@ -64,8 +121,10 @@ export interface GachaPullOutcome {
   readonly reason?: "INSUFFICIENT_COINS";
   readonly profile: PlayerProfile;
   readonly pulledHeroId?: HeroId;
+  readonly pulledRarity?: HeroRarity;
   readonly isDuplicate?: boolean;
   readonly newStarLevel?: number;
+  readonly nextRngSeed?: number;
 }
 
 export function pullGachaWithSeed(
@@ -76,23 +135,35 @@ export function pullGachaWithSeed(
     return { ok: false, reason: "INSUFFICIENT_COINS", profile };
   }
 
-  const nextPity = profile.pityCounter + 1;
+  const nextUltraPity = profile.pityCounter + 1;
+  const nextRarePity = (profile.rarePityCounter ?? 0) + 1;
   const step1 = nextRng(rngSeed);
   const step2 = nextRng(step1.nextState);
 
-  let pool: readonly HeroId[];
-  let resetPity = false;
+  let chosenRarity: HeroRarity;
+  let resetUltraPity = false;
+  let resetRarePity = false;
 
-  if (nextPity >= LEGENDARY_PITY_THRESHOLD || step1.value < 0.16) {
-    pool = ALL_HERO_IDS.filter((id) => HERO_CATALOG[id].rarity === "LEGENDARY");
-    resetPity = true;
-  } else if (step1.value < 0.52) {
-    pool = ALL_HERO_IDS.filter((id) => HERO_CATALOG[id].rarity === "ELITE");
+  if (nextUltraPity >= ULTRA_RARE_PITY_THRESHOLD || step1.value < 0.04) {
+    chosenRarity = "ULTRA_RARE";
+    resetUltraPity = true;
+    resetRarePity = true;
+  } else if (nextRarePity >= RARE_PITY_THRESHOLD || step1.value < 0.17) {
+    chosenRarity = "RARE";
+    resetRarePity = true;
+  } else if (step1.value < 0.45) {
+    chosenRarity = "UNCOMMON";
   } else {
-    pool = ALL_HERO_IDS.filter((id) => HERO_CATALOG[id].rarity === "COMMON");
+    chosenRarity = "COMMON";
   }
 
-  const pickIndex = Math.min(pool.length - 1, Math.floor(step2.value * pool.length));
+  const pool = ALL_HERO_IDS.filter(
+    (id) => HERO_CATALOG[id].rarity === chosenRarity
+  );
+  const pickIndex = Math.min(
+    pool.length - 1,
+    Math.floor(step2.value * pool.length)
+  );
   const pulledHeroId = pool[pickIndex] ?? "archer";
   const currentStars = profile.ownedHeroes[pulledHeroId] ?? 0;
   const isDuplicate = currentStars > 0;
@@ -114,13 +185,63 @@ export function pullGachaWithSeed(
     profile: {
       ...profile,
       metaCoins: profile.metaCoins - GACHA_PULL_COST,
-      pityCounter: resetPity ? 0 : nextPity,
+      pityCounter: resetUltraPity ? 0 : nextUltraPity,
+      rarePityCounter: resetRarePity ? 0 : nextRarePity,
       ownedHeroes: nextOwned,
       loadout: nextLoadout,
     },
     pulledHeroId,
+    pulledRarity: chosenRarity,
     isDuplicate,
     newStarLevel,
+    nextRngSeed: step2.nextState,
+  };
+}
+
+export function pullGachaBatchWithSeed(
+  profile: PlayerProfile,
+  count: 1 | 10,
+  rngSeed: number
+): {
+  readonly ok: boolean;
+  readonly reason?: "INSUFFICIENT_COINS";
+  readonly profile: PlayerProfile;
+  readonly results: readonly {
+    readonly heroId: HeroId;
+    readonly rarity: HeroRarity;
+    readonly isDuplicate: boolean;
+    readonly newStarLevel: number;
+  }[];
+} {
+  if (profile.metaCoins < GACHA_PULL_COST * count) {
+    return { ok: false, reason: "INSUFFICIENT_COINS", profile, results: [] };
+  }
+  let currentProfile = profile;
+  let currentSeed = rngSeed;
+  const results: {
+    readonly heroId: HeroId;
+    readonly rarity: HeroRarity;
+    readonly isDuplicate: boolean;
+    readonly newStarLevel: number;
+  }[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const out = pullGachaWithSeed(currentProfile, currentSeed);
+    if (!out.ok || !out.pulledHeroId || !out.pulledRarity) break;
+    currentProfile = out.profile;
+    currentSeed = out.nextRngSeed ?? currentSeed + 997;
+    results.push({
+      heroId: out.pulledHeroId,
+      rarity: out.pulledRarity,
+      isDuplicate: Boolean(out.isDuplicate),
+      newStarLevel: out.newStarLevel ?? 1,
+    });
+  }
+
+  return {
+    ok: true,
+    profile: currentProfile,
+    results,
   };
 }
 
@@ -166,6 +287,18 @@ export function toggleHeroInLoadout(
   };
 }
 
+export function completeAccountTutorial(profile: PlayerProfile): PlayerProfile {
+  if (profile.tutorialCompleted) {
+    return { ...profile, tutorialStep: 0 };
+  }
+  return {
+    ...profile,
+    tutorialCompleted: true,
+    tutorialStep: 0,
+    metaCoins: profile.metaCoins + 200,
+  };
+}
+
 export function awardBattleCompletion(
   profile: PlayerProfile,
   params: {
@@ -188,26 +321,41 @@ export function awardBattleCompletion(
     (sum, h) => sum + h.totalSkillCasts,
     0
   );
+  const difficulty = params.config.difficulty ?? "EASY";
+  const diffMult = DIFFICULTY_MULTIPLIERS[difficulty].rewardMultiplier;
 
-  const earnedCoins =
-    (params.victory ? 160 : 35) + verifiedWave * 18 + totalSkillCasts * 10;
-  const earnedXp = (params.victory ? 120 : 40) + verifiedWave * 15;
+  const earnedCoins = Math.round(
+    ((params.victory ? 160 : 35) + verifiedWave * 18 + totalSkillCasts * 10) *
+      diffMult
+  );
+  const earnedXp = Math.round(
+    ((params.victory ? 120 : 40) + verifiedWave * 15) * diffMult
+  );
   const totalXp = profile.xp + earnedXp;
   const levelUps = Math.floor(totalXp / 150);
   const nextLevel = Math.min(5, profile.playerLevel + levelUps);
   const remainingXp = totalXp % 150;
 
-  const nextUnlockedStages =
-    params.victory && params.config.stageId >= profile.unlockedStages
-      ? Math.min(3, profile.unlockedStages + 1)
-      : profile.unlockedStages;
+  let nextUnlockedMap = profile.unlockedStageDifficulties;
+  let nextUnlockedStages = profile.unlockedStages;
+  if (params.victory) {
+    nextUnlockedMap = applyStageVictoryUnlocks(
+      profile.unlockedStageDifficulties,
+      params.config.stageId,
+      difficulty
+    );
+    if (difficulty === "EASY" && params.config.stageId >= profile.unlockedStages) {
+      nextUnlockedStages = Math.min(10, params.config.stageId + 1);
+    }
+  }
 
   let nextLeaderboard = [...profile.leaderboard];
   if (params.config.mode === "ENDLESS" || verifiedWave >= 1 || verifiedScore > 0) {
     const entry: LeaderboardEntry = {
       id: `run-${params.config.seed}-${Date.now()}`,
-      playerName: params.playerName,
+      playerName: params.playerName || profile.username,
       stageId: params.config.stageId,
+      difficulty,
       waveReached: verifiedWave,
       score: verifiedScore,
       skillCasts: totalSkillCasts,
@@ -219,7 +367,7 @@ export function awardBattleCompletion(
     };
     nextLeaderboard = [...nextLeaderboard, entry]
       .sort((a, b) => b.score - a.score || b.waveReached - a.waveReached)
-      .slice(0, 10);
+      .slice(0, 15);
   }
 
   return {
@@ -228,6 +376,7 @@ export function awardBattleCompletion(
     xp: remainingXp,
     metaCoins: profile.metaCoins + earnedCoins,
     unlockedStages: nextUnlockedStages,
+    unlockedStageDifficulties: nextUnlockedMap,
     leaderboard: nextLeaderboard,
   };
 }

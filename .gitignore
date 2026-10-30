@@ -31,7 +31,8 @@ playwright/.cache/
 
 # Agent local state (keep skills & AGENTS.md tracked if desired, ignore temp caches)
 .claude/
-
+.agents/
+.cursor/
 # Editor & OS files
 .vscode/*
 !.vscode/extensions.json
@@ -43,3 +44,5 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+screenshots

@@ -1,6 +1,8 @@
 import {
-  ENEMY_WAYPOINTS,
-  getTileTerrain,
+  computeActiveSynergies,
+  DIFFICULTY_MULTIPLIERS,
+  getStageWaypointsPx,
+  getTileTerrainForStage,
   getUnlockedLoadoutSlots,
   HERO_CATALOG,
   isTileInBounds,
@@ -14,9 +16,11 @@ import {
   BattleState,
   CommandResult,
   DeployedHero,
+  ElementalSynergyBonus,
   EnemySnapshot,
   EnemyTrait,
   GameCommand,
+  HeroElement,
   HeroId,
   VisualFxEvent,
 } from "./types";
@@ -30,14 +34,24 @@ interface PathSegment {
   readonly startDistancePx: number;
 }
 
-const PATH_SEGMENTS: readonly PathSegment[] = (() => {
-  const list: PathSegment[] = [];
+interface StagePathData {
+  readonly segments: readonly PathSegment[];
+  readonly totalLengthPx: number;
+}
+
+const STAGE_PATH_CACHE = new Map<number, StagePathData>();
+
+export function getStagePathData(stageId: number): StagePathData {
+  const cached = STAGE_PATH_CACHE.get(stageId);
+  if (cached) return cached;
+  const waypoints = getStageWaypointsPx(stageId);
+  const segments: PathSegment[] = [];
   let acc = 0;
-  for (let i = 0; i < ENEMY_WAYPOINTS.length - 1; i++) {
-    const a = ENEMY_WAYPOINTS[i]!;
-    const b = ENEMY_WAYPOINTS[i + 1]!;
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const a = waypoints[i]!;
+    const b = waypoints[i + 1]!;
     const len = Math.hypot(b.x - a.x, b.y - a.y);
-    list.push({
+    segments.push({
       fromX: a.x,
       fromY: a.y,
       toX: b.x,
@@ -47,14 +61,21 @@ const PATH_SEGMENTS: readonly PathSegment[] = (() => {
     });
     acc += len;
   }
-  return list;
-})();
+  const built: StagePathData = { segments, totalLengthPx: acc };
+  STAGE_PATH_CACHE.set(stageId, built);
+  return built;
+}
 
-export const TOTAL_PATH_LENGTH_PX = PATH_SEGMENTS.reduce((sum, seg) => sum + seg.lengthPx, 0);
+export const TOTAL_PATH_LENGTH_PX = getStagePathData(1).totalLengthPx;
 
-export function positionAlongPath(distancePx: number): { readonly x: number; readonly y: number } {
-  const clamped = Math.max(0, Math.min(TOTAL_PATH_LENGTH_PX, distancePx));
-  for (const seg of PATH_SEGMENTS) {
+export function positionAlongStagePath(
+  stageId: number,
+  distancePx: number
+): { readonly x: number; readonly y: number } {
+  const pathData = getStagePathData(stageId);
+  const waypoints = getStageWaypointsPx(stageId);
+  const clamped = Math.max(0, Math.min(pathData.totalLengthPx, distancePx));
+  for (const seg of pathData.segments) {
     if (clamped <= seg.startDistancePx + seg.lengthPx) {
       const local = seg.lengthPx > 0 ? (clamped - seg.startDistancePx) / seg.lengthPx : 0;
       return {
@@ -63,8 +84,19 @@ export function positionAlongPath(distancePx: number): { readonly x: number; rea
       };
     }
   }
-  const last = ENEMY_WAYPOINTS[ENEMY_WAYPOINTS.length - 1]!;
+  const last = waypoints[waypoints.length - 1]!;
   return { x: last.x, y: last.y };
+}
+
+export function positionAlongPath(distancePx: number): { readonly x: number; readonly y: number } {
+  return positionAlongStagePath(1, distancePx);
+}
+
+export function isSynergyActive(
+  synergies: readonly ElementalSynergyBonus[],
+  element: HeroElement
+): boolean {
+  return synergies.some((s) => s.element === element && s.active);
 }
 
 export function getHeroUpgradeCost(heroId: HeroId, currentLevel: number): number {
@@ -72,17 +104,36 @@ export function getHeroUpgradeCost(heroId: HeroId, currentLevel: number): number
   return Math.round(def.upgradeBaseCost * Math.pow(1.45, currentLevel - 1));
 }
 
-export function getHeroEffectiveDamage(hero: DeployedHero): number {
+export function getHeroEffectiveDamage(
+  hero: DeployedHero,
+  synergies?: readonly ElementalSynergyBonus[]
+): number {
   const def = HERO_CATALOG[hero.heroId];
   const levelMultiplier = 1 + (hero.level - 1) * 0.35;
   const starMultiplier = 1 + (hero.stars - 1) * 0.18;
-  return Math.round(def.baseDamage * levelMultiplier * starMultiplier);
+  let synMultiplier = 1.0;
+  if (synergies) {
+    if (def.element === "FLAME" && isSynergyActive(synergies, "FLAME")) {
+      synMultiplier += 0.25;
+    }
+    if (isSynergyActive(synergies, "SOLAR")) {
+      synMultiplier += 0.2;
+    }
+  }
+  return Math.round(def.baseDamage * levelMultiplier * starMultiplier * synMultiplier);
 }
 
-export function getHeroSkillCooldownTicks(heroId: HeroId, stars: number): number {
+export function getHeroSkillCooldownTicks(
+  heroId: HeroId,
+  stars: number,
+  synergies?: readonly ElementalSynergyBonus[]
+): number {
   const def = HERO_CATALOG[heroId];
-  const reduction = Math.min(0.32, (Math.max(1, stars) - 1) * 0.08);
-  return Math.max(60, Math.round(def.skillCooldownTicks * (1 - reduction)));
+  const starReduction = Math.min(0.32, (Math.max(1, stars) - 1) * 0.08);
+  const stormBonus =
+    synergies && isSynergyActive(synergies, "STORM") ? 0.2 : 0;
+  const totalReduction = Math.min(0.48, starReduction + stormBonus);
+  return Math.max(50, Math.round(def.skillCooldownTicks * (1 - totalReduction)));
 }
 
 export function getDeployCountForHero(state: BattleState, heroId: HeroId): number {
@@ -107,6 +158,7 @@ export function createInitialBattleState(config: BattleConfig): BattleState {
   return {
     config: {
       ...config,
+      difficulty: config.difficulty ?? "EASY",
       loadout: uniqueLoadout,
     },
     rngState: config.seed >>> 0,
@@ -125,6 +177,7 @@ export function createInitialBattleState(config: BattleConfig): BattleState {
     waveCooldownUntilTick: 40,
     deployedHeroes: [],
     enemies: [],
+    activeSynergies: computeActiveSynergies([]),
     commandLog: [],
     recentEvents: [],
   };
@@ -136,14 +189,15 @@ function buildEnemyForWave(
   spawnIndex: number
 ): { readonly enemy: EnemySnapshot; readonly nextRngState: number } {
   const stageDef = STAGE_CATALOG.find((s) => s.id === state.config.stageId) ?? STAGE_CATALOG[0]!;
+  const diffDef = DIFFICULTY_MULTIPLIERS[state.config.difficulty ?? "EASY"];
   const rollStep = rngInt(state.rngState, 0, 99);
   const roll = rollStep.result;
 
   const isBossSlot = spawnIndex === 0 && waveNumber % 5 === 0;
   let trait: EnemyTrait = "NORMAL";
-  let archetypeName = "Goblin Raider";
+  let archetypeName = "Rift Stalker";
   let hpMultiplier = 1.0;
-  let speedPxPerTick = 1.35 * stageDef.speedScale;
+  let speedPxPerTick = 1.35 * stageDef.speedScale * diffDef.speedMultiplier;
   let armor = 2 + Math.floor(waveNumber * 0.8);
   let rewardGold = 14 + Math.floor(waveNumber * 1.5);
 
@@ -151,36 +205,42 @@ function buildEnemyForWave(
     trait = "BOSS_SILENCER";
     archetypeName = "Void Warlord (Boss)";
     hpMultiplier = 4.2;
-    speedPxPerTick = 0.88 * stageDef.speedScale;
+    speedPxPerTick = 0.88 * stageDef.speedScale * diffDef.speedMultiplier;
     armor = 12 + waveNumber * 2;
     rewardGold = 65 + waveNumber * 6;
   } else if (waveNumber >= 2 && roll < 28) {
     trait = "SWIFT";
     archetypeName = "Shadowhound";
     hpMultiplier = 0.72;
-    speedPxPerTick = 2.15 * stageDef.speedScale;
+    speedPxPerTick = 2.15 * stageDef.speedScale * diffDef.speedMultiplier;
     armor = 1;
   } else if (waveNumber >= 3 && roll >= 28 && roll < 56) {
     trait = "ARMORED";
     archetypeName = "Iron Juggernaut";
     hpMultiplier = 1.85;
-    speedPxPerTick = 0.95 * stageDef.speedScale;
+    speedPxPerTick = 0.95 * stageDef.speedScale * diffDef.speedMultiplier;
     armor = 10 + waveNumber * 2;
     rewardGold += 6;
   } else if (waveNumber >= 4 && roll >= 56 && roll < 76) {
     trait = "HEALER";
-    archetypeName = "Blood Shaman";
+    archetypeName = "Abyssal Shaman";
     hpMultiplier = 1.15;
-    speedPxPerTick = 1.2 * stageDef.speedScale;
+    speedPxPerTick = 1.2 * stageDef.speedScale * diffDef.speedMultiplier;
     armor = 4 + waveNumber;
     rewardGold += 5;
   }
 
   const endlessScale =
     waveNumber > 10 ? Math.pow(1.22, waveNumber - 10) : 1 + (waveNumber - 1) * 0.28;
-  const baseWaveHp = 68 * stageDef.hpScale * endlessScale * (waveNumber > 10 ? 2.6 : 1.0);
+  const baseWaveHp =
+    68 *
+    stageDef.hpScale *
+    diffDef.hpMultiplier *
+    endlessScale *
+    (waveNumber > 10 ? 2.6 : 1.0);
   const maxHp = Math.max(30, Math.round(baseWaveHp * hpMultiplier));
-  const startPos = ENEMY_WAYPOINTS[0]!;
+  const waypoints = getStageWaypointsPx(stageDef.id);
+  const startPos = waypoints[0]!;
 
   return {
     enemy: {
@@ -192,7 +252,9 @@ function buildEnemyForWave(
       armor,
       speedPxPerTick,
       rewardGold,
-      scoreValue: isBossSlot ? 250 * waveNumber : 25 * waveNumber,
+      scoreValue: Math.round(
+        (isBossSlot ? 250 * waveNumber : 25 * waveNumber) * diffDef.rewardMultiplier
+      ),
       pathDistancePx: 0,
       x: startPos.x,
       y: startPos.y,
@@ -223,7 +285,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
       if (!isTileInBounds(col, row)) {
         return { ok: false, reason: "TILE_OUT_OF_BOUNDS", state };
       }
-      const terrain = getTileTerrain(col, row);
+      const terrain = getTileTerrainForStage(state.config.stageId, col, row);
       if (terrain === "PATH") {
         return { ok: false, reason: "TILE_IS_PATH", state };
       }
@@ -265,17 +327,21 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
         totalSkillCasts: 0,
       };
 
+      const nextDeployed = [...state.deployedHeroes, newHero];
+      const nextSynergies = computeActiveSynergies(nextDeployed);
+
       const nextState: BattleState = {
         ...state,
         gold: state.gold - def.deployCost,
         nextEntityId: state.nextEntityId + 1,
-        deployedHeroes: [...state.deployedHeroes, newHero],
+        deployedHeroes: nextDeployed,
+        activeSynergies: nextSynergies,
         commandLog: [...state.commandLog, normalizedCommand],
       };
       return {
         ok: true,
         state: nextState,
-        eventText: `วาง ${def.name} ที่พิกัด (${col},${row}) [${terrain === "HIGH_GROUND" ? "ที่สูง" : "พื้นราบ"}] (${currentCount + 1}/${def.maxDeployCount})`,
+        eventText: `วาง ${def.name} [${def.element}] ที่ (${col},${row}) (${currentCount + 1}/${def.maxDeployCount})`,
       };
     }
 
@@ -317,12 +383,16 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
       }
       const def = HERO_CATALOG[target.heroId];
       const refund = Math.round(def.deployCost * 0.7 + (target.level - 1) * def.upgradeBaseCost * 0.5);
+      const nextDeployed = state.deployedHeroes.filter(
+        (h) => h.instanceId !== target.instanceId
+      );
       return {
         ok: true,
         state: {
           ...state,
           gold: state.gold + refund,
-          deployedHeroes: state.deployedHeroes.filter((h) => h.instanceId !== target.instanceId),
+          deployedHeroes: nextDeployed,
+          activeSynergies: computeActiveSynergies(nextDeployed),
           commandLog: [...state.commandLog, normalizedCommand],
         },
         eventText: `ถอน ${def.name} (+${refund} Gold)`,
@@ -369,8 +439,13 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
         return { ok: false, reason: "HERO_SILENCED", state };
       }
 
-      const cooldown = getHeroSkillCooldownTicks(caster.heroId, caster.stars);
-      const baseDmg = getHeroEffectiveDamage(caster);
+      const cooldown = getHeroSkillCooldownTicks(
+        caster.heroId,
+        caster.stars,
+        state.activeSynergies
+      );
+      const baseDmg = getHeroEffectiveDamage(caster, state.activeSynergies);
+      const flameSynergy = isSynergyActive(state.activeSynergies, "FLAME");
       let updatedEnemies = [...state.enemies];
       let updatedHeroes = state.deployedHeroes.map((h) =>
         h.instanceId === caster.instanceId
@@ -418,6 +493,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
           const centerX = lead ? lead.x : caster.x;
           const centerY = lead ? lead.y : caster.y;
           const burstDmg = Math.round(baseDmg * effect.damageMultiplier);
+          const burnScale = flameSynergy ? 0.27 : 0.18;
           fxEvents.push({
             tick: state.tick,
             kind: "SKILL_BURST",
@@ -437,7 +513,10 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
               ...e,
               hp: e.hp - dealt,
               burnTicksRemaining: Math.max(e.burnTicksRemaining, effect.burnTicks),
-              burnDamagePerTick: Math.max(e.burnDamagePerTick, Math.round(baseDmg * 0.18)),
+              burnDamagePerTick: Math.max(
+                e.burnDamagePerTick,
+                Math.round(baseDmg * burnScale)
+              ),
             };
           });
           break;
@@ -449,8 +528,8 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
             kind: "SKILL_BURST",
             fromX: caster.x,
             fromY: caster.y,
-            toX: 320,
-            toY: 208,
+            toX: 360,
+            toY: 234,
             color: def.palette.primary,
             label: def.skillName,
           });
@@ -515,14 +594,14 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
             kind: "SKILL_BURST",
             fromX: caster.x,
             fromY: caster.y,
-            toX: 320,
-            toY: 208,
+            toX: 360,
+            toY: 234,
             color: def.palette.primary,
             label: def.skillName,
           });
           updatedEnemies = updatedEnemies.map((e) => {
             const nextDist = Math.max(0, e.pathDistancePx - effect.rewindProgress);
-            const pos = positionAlongPath(nextDist);
+            const pos = positionAlongStagePath(state.config.stageId, nextDist);
             const warpDmg = Math.round(baseDmg * 1.8);
             bonusDamageDealt += warpDmg;
             return {
@@ -649,6 +728,10 @@ export function stepSimulationTick(state: BattleState): BattleState {
   let deployedHeroes = [...state.deployedHeroes];
   let enemies = [...state.enemies];
   const fxEvents: VisualFxEvent[] = [];
+  const stagePathData = getStagePathData(state.config.stageId);
+  const frostSynergy = isSynergyActive(state.activeSynergies, "FROST");
+  const stormSynergy = isSynergyActive(state.activeSynergies, "STORM");
+  const solarSynergy = isSynergyActive(state.activeSynergies, "SOLAR");
 
   if (phase === "PREPARING" && nextTick >= waveCooldownUntilTick && wave > 0) {
     const started = applyCommand({ ...state, tick: nextTick }, { kind: "START_WAVE", tick: nextTick });
@@ -710,7 +793,7 @@ export function stepSimulationTick(state: BattleState): BattleState {
       stunTicksRemaining > 0 ? 0 : enemy.speedPxPerTick * activeSlowFactor;
     const nextDistance = enemy.pathDistancePx + stepDistance;
 
-    if (nextDistance >= TOTAL_PATH_LENGTH_PX) {
+    if (nextDistance >= stagePathData.totalLengthPx) {
       const leakDamage = enemy.trait === "BOSS_SILENCER" ? 4 : 1;
       baseHp = Math.max(0, baseHp - leakDamage);
       fxEvents.push({
@@ -725,7 +808,7 @@ export function stepSimulationTick(state: BattleState): BattleState {
       continue;
     }
 
-    const pos = positionAlongPath(nextDistance);
+    const pos = positionAlongStagePath(state.config.stageId, nextDistance);
     movedEnemies.push({
       ...enemy,
       hp,
@@ -759,15 +842,19 @@ export function stepSimulationTick(state: BattleState): BattleState {
       return hero;
     }
     const def = HERO_CATALOG[hero.heroId];
+    const effectiveRange =
+      def.element === "FROST" && frostSynergy
+        ? Math.round(def.rangePx * 1.15)
+        : def.rangePx;
     const inRange = enemies.filter(
-      (e) => e.hp > 0 && Math.hypot(e.x - hero.x, e.y - hero.y) <= def.rangePx
+      (e) => e.hp > 0 && Math.hypot(e.x - hero.x, e.y - hero.y) <= effectiveRange
     );
     const primaryTarget = selectEnemyTarget(hero, inRange);
     if (!primaryTarget) {
       return hero;
     }
 
-    const rawDmg = getHeroEffectiveDamage(hero);
+    const rawDmg = getHeroEffectiveDamage(hero, state.activeSynergies);
     let heroDealt = 0;
 
     enemies = enemies.map((e) => {
@@ -783,6 +870,7 @@ export function stepSimulationTick(state: BattleState): BattleState {
       heroDealt += dealt;
 
       const applySlow = def.slowPercent > 0;
+      const extraSlow = frostSynergy ? 12 : 0;
       return {
         ...e,
         hp: e.hp - dealt,
@@ -790,7 +878,7 @@ export function stepSimulationTick(state: BattleState): BattleState {
           ? Math.max(e.slowTicksRemaining, def.slowTicks)
           : e.slowTicksRemaining,
         slowFactor: applySlow
-          ? Math.min(e.slowFactor, 1 - def.slowPercent / 100)
+          ? Math.min(e.slowFactor, Math.max(0.25, 1 - (def.slowPercent + extraSlow) / 100))
           : e.slowFactor,
       };
     });
@@ -806,7 +894,12 @@ export function stepSimulationTick(state: BattleState): BattleState {
     });
 
     const hasteMultiplier = nextTick < hero.hasteUntilTick ? 0.62 : 1.0;
-    const interval = Math.max(5, Math.round(def.attackIntervalTicks * hasteMultiplier));
+    const stormSpeedMultiplier =
+      def.element === "STORM" && stormSynergy ? 0.85 : 1.0;
+    const interval = Math.max(
+      5,
+      Math.round(def.attackIntervalTicks * hasteMultiplier * stormSpeedMultiplier)
+    );
     return {
       ...hero,
       nextAttackTick: nextTick + interval,
@@ -827,7 +920,8 @@ export function stepSimulationTick(state: BattleState): BattleState {
   enemies = aliveAfterCombat;
 
   if (phase === "WAVE_ACTIVE" && waveSpawnRemaining === 0 && enemies.length === 0) {
-    const waveClearGold = 35 + wave * 8;
+    const solarBonus = solarSynergy ? 25 : 0;
+    const waveClearGold = 35 + wave * 8 + solarBonus;
     gold += waveClearGold;
     score += 120 * wave;
     if (state.config.mode === "STAGE" && wave >= state.maxWave) {

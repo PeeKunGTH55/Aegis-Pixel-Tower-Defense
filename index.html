@@ -2,66 +2,201 @@
 <html lang="th">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Aegis Pixel TD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>ELEMENTAL RIFT TD</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@500;700&family=Press+Start+2P&display=swap" rel="stylesheet" />
     <style>
       :root {
-        --bg-void: #0c0e14;
-        --bg-panel: #151924;
-        --bg-card: #1d2332;
-        --border-stone: #333d54;
-        --border-gold: #e6b450;
-        --text-main: #f0f4f8;
-        --text-dim: #94a3b8;
-        --accent-gold: #f59e0b;
-        --accent-cyan: #38bdf8;
+        --p-density: 1;
+        --bg-void: #090d16;
+        --bg-surface: #111827;
+        --bg-elevated: #1a2336;
+        --bg-interactive: #243049;
+        --border-subtle: #2a3752;
+        --border-strong: #47597a;
+        --border-focus: #f59e0b;
+        --text-primary: #f1f5f9;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        --accent-amber: #f59e0b;
+        --accent-sky: #38bdf8;
         --accent-emerald: #10b981;
-        --accent-crimson: #ef4444;
+        --accent-rose: #f43f5e;
         --accent-violet: #a855f7;
       }
+
+      ::selection {
+        background: var(--accent-amber);
+        color: #090d16;
+      }
+
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--bg-void);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--border-strong);
+        border-radius: 4px;
+      }
+
       * {
         box-sizing: border-box;
         margin: 0;
         padding: 0;
         user-select: none;
       }
+
       body {
         background: var(--bg-void);
-        color: var(--text-main);
+        color: var(--text-primary);
         font-family: "Chakra Petch", sans-serif;
         min-height: 100vh;
+        width: 100%;
+        overflow-x: hidden;
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+
+      button, input {
+        font-family: inherit;
+      }
+
+      button:focus-visible, input:focus-visible {
+        outline: 2px solid var(--border-focus);
+        outline-offset: 2px;
+      }
+
+      .num {
+        font-family: "JetBrains Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      #app-shell {
+        width: 100%;
+        min-height: 100vh;
+        padding: calc(10px * var(--p-density)) calc(18px * var(--p-density));
         display: flex;
         flex-direction: column;
-        align-items: center;
-        justify-content: flex-start;
-        overflow-x: hidden;
+        gap: calc(10px * var(--p-density));
       }
-      canvas {
+
+      #stage-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 14px;
+        align-items: stretch;
+        width: 100%;
+      }
+
+      #phaser-stage-wrap {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        padding: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 560px;
+      }
+
+      #phaser-mount {
+        width: 100%;
+        height: 62vh;
+        min-height: 520px;
+        max-height: 760px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border-strong);
+        background: #070a12;
+        overflow: hidden;
+      }
+
+      #phaser-mount canvas {
         image-rendering: pixelated;
         image-rendering: crisp-edges;
         display: block;
       }
-      #app-shell {
-        width: 100%;
-        max-width: 1180px;
-        padding: 12px 16px;
-        display: flex;
-        flex-direction: column;
+
+      .btn-touch {
+        min-height: 38px;
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border-subtle);
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      .btn-touch:hover {
+        background: var(--bg-interactive);
+        border-color: var(--border-strong);
+      }
+
+      .loadout-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(175px, 1fr));
         gap: 10px;
+        width: 100%;
+      }
+
+      @media (max-width: 1180px) {
+        #stage-layout {
+          grid-template-columns: 1fr;
+        }
+        #phaser-stage-wrap {
+          min-height: auto;
+        }
+      }
+
+      @media (max-width: 768px) {
+        #app-shell {
+          padding: 8px 10px;
+          gap: 8px;
+        }
+        #phaser-mount {
+          height: auto;
+          min-height: 250px;
+          aspect-ratio: 20 / 13;
+        }
+        .btn-touch {
+          min-height: 44px;
+          padding: 8px 12px;
+          font-size: 13px;
+        }
+        .loadout-grid {
+          display: flex;
+          overflow-x: auto;
+          padding-bottom: 6px;
+          scroll-snap-type: x mandatory;
+        }
+        .loadout-grid > div {
+          min-width: 210px;
+          scroll-snap-align: start;
+        }
       }
     </style>
   </head>
   <body>
     <div id="app-shell">
-      <div id="hud-top"></div>
-      <div id="stage-layout" style="display: flex; gap: 12px; align-items: flex-start; justify-content: center; flex-wrap: wrap;">
-        <div id="phaser-mount" style="border: 3px solid var(--border-stone); background: #090b10; box-shadow: 0 10px 30px rgba(0,0,0,0.65);"></div>
-        <div id="hud-side" style="flex: 1; min-width: 320px; max-width: 380px;"></div>
-      </div>
-      <div id="hud-bottom"></div>
+      <header id="hud-top"></header>
+      <section id="hud-tutorial"></section>
+      <main id="stage-layout">
+        <div id="phaser-stage-wrap">
+          <div id="phaser-mount"></div>
+        </div>
+        <aside id="hud-side"></aside>
+      </main>
+      <section id="hud-bottom"></section>
+      <section id="hud-drawer"></section>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

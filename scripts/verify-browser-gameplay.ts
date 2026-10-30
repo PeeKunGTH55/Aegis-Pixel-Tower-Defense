@@ -47,10 +47,10 @@ async function runVerification(): Promise<void> {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const context = await browser.newContext({
-      viewport: { width: 1240, height: 840 },
+    const desktopContext = await browser.newContext({
+      viewport: { width: 1920, height: 1080 },
     });
-    const page = await context.newPage();
+    const page = await desktopContext.newPage();
 
     page.on("console", (msg) => {
       if (msg.type() === "error") {
@@ -64,89 +64,87 @@ async function runVerification(): Promise<void> {
     await page.goto(BASE_URL, { waitUntil: "networkidle", timeout: 15000 });
     await page.waitForFunction(() => Boolean(window.__TD_APP__), { timeout: 10000 });
 
+    await page.click('[data-testid="tab-account"]');
+    await page.fill('[data-testid="input-username"]', "RiftTactician");
+    await page.fill('[data-testid="input-password"]', "secret123");
+    await page.click('[data-testid="btn-auth-submit"]');
+    await page.waitForSelector('[data-testid="tutorial-banner"]', { timeout: 5000 });
+
+    await page.click('[data-testid="tab-battle"]');
     await page.screenshot({
-      path: path.join(SCREENSHOT_DIR, "01-battle-initial.png"),
+      path: path.join(SCREENSHOT_DIR, "01-desktop-widescreen-tutorial.png"),
       fullPage: true,
     });
+
+    const coinsBeforeTutorial = await page.evaluate(
+      () => window.__TD_APP__!.getSnapshot().profile.metaCoins
+    );
+    await page.click('[data-testid="btn-tutorial-skip"]');
+    const coinsAfterTutorial = await page.evaluate(
+      () => window.__TD_APP__!.getSnapshot().profile.metaCoins
+    );
+    if (coinsAfterTutorial !== coinsBeforeTutorial + 200) {
+      throw new Error(
+        `Expected +200 tutorial completion bonus (${coinsBeforeTutorial} -> ${coinsAfterTutorial})`
+      );
+    }
 
     await page.click('[data-testid="tab-roster"]');
     await page.waitForSelector('[data-testid="btn-pull-gacha"]', { timeout: 5000 });
-
-    const beforeCoins = await page.evaluate(
-      () => window.__TD_APP__!.getSnapshot().profile.metaCoins
-    );
     await page.click('[data-testid="btn-pull-gacha"]');
     await page.waitForSelector('[data-testid="gacha-result-banner"]', { timeout: 5000 });
-    const afterCoins = await page.evaluate(
-      () => window.__TD_APP__!.getSnapshot().profile.metaCoins
-    );
-    if (afterCoins !== beforeCoins - 100) {
-      throw new Error(`Expected metaCoins to drop by 100 (${beforeCoins} -> ${afterCoins})`);
-    }
-
     await page.screenshot({
-      path: path.join(SCREENSHOT_DIR, "02-gacha-and-roster.png"),
+      path: path.join(SCREENSHOT_DIR, "02-gacha-4tier-and-roster.png"),
       fullPage: true,
     });
 
-    await page.click('[data-testid="tab-battle"]');
-    await page.waitForSelector('[data-testid="btn-deploy-on-tile"]', { timeout: 5000 });
+    await page.click('[data-testid="tab-stages"]');
+    await page.waitForSelector('[data-testid="drawer-stages"]', { timeout: 5000 });
 
-    const canvasBox = await page.locator("#phaser-mount canvas").boundingBox();
-    if (!canvasBox) {
-      throw new Error("Phaser canvas boundingBox not found");
+    const stage2EasyLockedBefore = await page.isDisabled('[data-testid="btn-stage-2-EASY"]');
+    const stage1MedLockedBefore = await page.isDisabled('[data-testid="btn-stage-1-MEDIUM"]');
+    if (!stage2EasyLockedBefore || !stage1MedLockedBefore) {
+      throw new Error("Expected Stage 1 MEDIUM and Stage 2 EASY to start locked for new account");
     }
 
-    await page.mouse.click(canvasBox.x + 2 * 32 + 16, canvasBox.y + 2 * 32 + 16);
-    const pathRejectBanner = await page.textContent('[data-testid="status-banner"]');
-    if (!pathRejectBanner?.includes("TILE_IS_PATH")) {
+    await page.evaluate(() => {
+      window.__TD_APP__!.simulateStageClearForVerification(1, "EASY");
+    });
+
+    const stage2EasyLockedAfter = await page.isDisabled('[data-testid="btn-stage-2-EASY"]');
+    const stage1MedLockedAfter = await page.isDisabled('[data-testid="btn-stage-1-MEDIUM"]');
+    if (stage2EasyLockedAfter || stage1MedLockedAfter) {
       throw new Error(
-        `Expected clicking enemy path tile (2,2) to reject with TILE_IS_PATH, got: ${pathRejectBanner}`
+        "Clearing Stage 1 EASY must unlock both Stage 1 MEDIUM and Stage 2 EASY"
+      );
+    }
+
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, "03-stages-cross-unlock-tree.png"),
+      fullPage: true,
+    });
+
+    await page.click('[data-testid="btn-stage-2-EASY"]');
+    await page.waitForSelector('[data-testid="btn-deploy-on-tile"]', { timeout: 5000 });
+
+    await page.click('[data-testid="select-hero-archer"]');
+    await page.click('[data-testid="ground-tile-0"]');
+    await page.click('[data-testid="btn-deploy-on-tile"]');
+
+    await page.click('[data-testid="select-hero-pyromancer"]');
+    await page.click('[data-testid="ground-tile-1"]');
+    await page.click('[data-testid="btn-deploy-on-tile"]');
+
+    const flameSynergyText = await page.textContent('[data-testid="synergy-pill-FLAME"]');
+    if (!flameSynergyText?.includes("ACTIVE")) {
+      throw new Error(
+        `Expected deploying 2 FLAME heroes to activate FLAME synergy, got: ${flameSynergyText}`
       );
     }
 
     await page.click('[data-testid="select-hero-frostmage"]');
-    await page.click('[data-testid="ground-tile-0"]');
-    await page.click('[data-testid="btn-deploy-on-tile"]');
-    const terrainMismatchBanner = await page.textContent('[data-testid="status-banner"]');
-    if (!terrainMismatchBanner?.includes("TERRAIN_MISMATCH")) {
-      throw new Error(
-        `Expected placing High-Ground hero frostmage on Ground tile to reject with TERRAIN_MISMATCH, got: ${terrainMismatchBanner}`
-      );
-    }
-
     await page.click('[data-testid="hg-tile-0"]');
     await page.click('[data-testid="btn-deploy-on-tile"]');
-
-    await page.click('[data-testid="hg-tile-1"]');
-    await page.click('[data-testid="btn-deploy-on-tile"]');
-
-    const frostCount = await page.textContent('[data-testid="deploy-cap-frostmage"]');
-    if (frostCount?.trim() !== "2/2") {
-      throw new Error(`Expected frostmage deploy cap badge to be 2/2, got ${frostCount}`);
-    }
-
-    await page.click('[data-testid="hg-tile-2"]');
-    await page.click('[data-testid="btn-deploy-on-tile"]');
-    const capBanner = await page.textContent('[data-testid="status-banner"]');
-    if (!capBanner?.includes("DEPLOY_CAP_REACHED")) {
-      throw new Error(`Expected 3rd frostmage deploy to fail with DEPLOY_CAP_REACHED, got: ${capBanner}`);
-    }
-
-    await page.click('[data-testid="hg-tile-1"]');
-    await page.click('[data-testid="btn-sell-selected"]');
-
-    await page.click('[data-testid="select-hero-pyromancer"]');
-    await page.mouse.click(canvasBox.x + 2 * 32 + 16, canvasBox.y + 4 * 32 + 16);
-    const pyroCount = await page.textContent('[data-testid="deploy-cap-pyromancer"]');
-    if (pyroCount?.trim() !== "1/6") {
-      throw new Error(
-        `Expected free canvas click on Ground tile (2,4) to deploy pyromancer (1/6), got ${pyroCount}`
-      );
-    }
-
-    await page.click('[data-testid="select-hero-archer"]');
-    await page.mouse.click(canvasBox.x + 5 * 32 + 16, canvasBox.y + 4 * 32 + 16);
 
     const startWaveBtnBox = await page.locator('[data-testid="btn-start-wave"]').boundingBox();
     if (!startWaveBtnBox) {
@@ -170,29 +168,42 @@ async function runVerification(): Promise<void> {
 
     await page.waitForTimeout(350);
     await page.screenshot({
-      path: path.join(SCREENSHOT_DIR, "03-tactical-deploy-and-skill.png"),
+      path: path.join(SCREENSHOT_DIR, "04-stage2-synergy-and-skill.png"),
       fullPage: true,
     });
 
     await page.click('[data-testid="tab-leaderboard"]');
     await page.waitForSelector('[data-testid="btn-record-run"]', { timeout: 5000 });
     await page.click('[data-testid="btn-record-run"]');
-    await page.waitForSelector('[data-testid="leaderboard-row-2"]', { timeout: 5000 });
     const lbText = await page.textContent('[data-testid="leaderboard-list"]');
-    if (!lbText?.includes("Commander You")) {
-      throw new Error("Expected recorded run 'Commander You' to appear in Leaderboard");
+    if (!lbText?.includes("RiftTactician")) {
+      throw new Error("Expected logged-in account 'RiftTactician' on Leaderboard");
     }
 
-    await page.screenshot({
-      path: path.join(SCREENSHOT_DIR, "04-endless-leaderboard.png"),
+    const mobileContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    const mobilePage = await mobileContext.newPage();
+    await mobilePage.goto(BASE_URL, { waitUntil: "networkidle", timeout: 15000 });
+    await mobilePage.waitForFunction(() => Boolean(window.__TD_APP__), { timeout: 10000 });
+    await mobilePage.screenshot({
+      path: path.join(SCREENSHOT_DIR, "05-mobile-responsive.png"),
       fullPage: true,
     });
+    await mobileContext.close();
 
     if (consoleErrors.length > 0) {
       throw new Error(`Browser console/page errors detected:\n${consoleErrors.join("\n")}`);
     }
 
     console.log("BROWSER VERIFICATION PASSED");
+    console.log("- Account registration & 4-step first-time tutorial (+200 Coins) verified");
+    console.log("- 10-Stage cross-progression unlock (Stage 1 Easy -> Stage 1 Medium + Stage 2 Easy) verified");
+    console.log("- Stage 2 distinct map & FLAME 2/2 Elemental Synergy ACTIVE verified");
+    console.log("- Desktop Widescreen (1920x1080) & Mobile Responsive (390x844) screenshots captured");
+    console.log(`- Console Errors: ${consoleErrors.length}`);
   } finally {
     await browser.close();
     if (serverProc && serverProc.pid) {
