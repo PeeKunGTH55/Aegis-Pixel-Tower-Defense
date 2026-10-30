@@ -5,7 +5,8 @@ import { chromium } from "playwright";
 
 const PORT = 5173;
 const BASE_URL = `http://localhost:${PORT}`;
-const SCREENSHOT_DIR = path.resolve(process.cwd(), "screenshots", "tower-defense-mvp");
+const AUDIT_DIR = path.resolve(process.cwd(), "screenshots", "persona-audit");
+const MVP_DIR = path.resolve(process.cwd(), "screenshots", "tower-defense-mvp");
 
 async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
   const start = Date.now();
@@ -21,8 +22,9 @@ async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
   throw new Error(`Server at ${url} did not become ready within ${timeoutMs}ms`);
 }
 
-async function runVerification(): Promise<void> {
-  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+async function runPersonaAudit(): Promise<void> {
+  fs.mkdirSync(AUDIT_DIR, { recursive: true });
+  fs.mkdirSync(MVP_DIR, { recursive: true });
 
   let serverProc: ChildProcess | null = null;
   let serverAlreadyUp = false;
@@ -47,163 +49,258 @@ async function runVerification(): Promise<void> {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const desktopContext = await browser.newContext({
-      viewport: { width: 1920, height: 1080 },
+    // =========================================================================
+    // PERSONA 1: First-Time Novice Player (Desktop 1920x1080)
+    // =========================================================================
+    const p1Context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+    const p1Page = await p1Context.newPage();
+    p1Page.on("console", (m) => {
+      if (m.type() === "error") consoleErrors.push(`[P1] ${m.text()}`);
     });
-    const page = await desktopContext.newPage();
+    p1Page.on("pageerror", (e) => consoleErrors.push(`[P1] ${e.message}`));
 
-    page.on("console", (msg) => {
-      if (msg.type() === "error") {
-        consoleErrors.push(msg.text());
-      }
+    await p1Page.goto(BASE_URL, { waitUntil: "networkidle", timeout: 15000 });
+    await p1Page.waitForFunction(() => Boolean(window.__TD_APP__), { timeout: 10000 });
+
+    await p1Page.waitForSelector('[data-testid="modal-tutorial"]', { timeout: 5000 });
+    await p1Page.click('[data-testid="btn-tut-step-2"]');
+    await p1Page.waitForSelector('[data-testid="tutorial-illustration-2"]', { timeout: 5000 });
+    await p1Page.screenshot({
+      path: path.join(AUDIT_DIR, "01-persona1-tutorial-slide2.png"),
+      fullPage: true,
     });
-    page.on("pageerror", (err) => {
-      consoleErrors.push(err.message);
+    await p1Page.click('[data-testid="btn-tutorial-claim"]');
+
+    // Open Roster & click on heroes to inspect their skills
+    await p1Page.click('[data-testid="btn-modal-roster"]');
+    await p1Page.waitForSelector('[data-testid="roster-hero-inspector"]', { timeout: 5000 });
+
+    await p1Page.click('[data-testid="roster-card-paladin"]');
+    const paladinInspectedName = await p1Page.textContent('[data-testid="inspector-hero-name"]');
+    const paladinSkillText = await p1Page.textContent('[data-testid="inspector-skill-box"]');
+    if (!paladinInspectedName?.includes("Solaris Commander") || !paladinSkillText?.includes("Sanctuary Cleanse")) {
+      throw new Error(`Expected clicking paladin card to show Solaris Commander & Sanctuary Cleanse in inspector, got: ${paladinInspectedName} / ${paladinSkillText}`);
+    }
+    await p1Page.screenshot({
+      path: path.join(AUDIT_DIR, "02-persona1-roster-skill-inspector-active.png"),
+      fullPage: true,
     });
-
-    await page.goto(BASE_URL, { waitUntil: "networkidle", timeout: 15000 });
-    await page.waitForFunction(() => Boolean(window.__TD_APP__), { timeout: 10000 });
-
-    await page.click('[data-testid="tab-account"]');
-    await page.fill('[data-testid="input-username"]', "RiftTactician");
-    await page.fill('[data-testid="input-password"]', "secret123");
-    await page.click('[data-testid="btn-auth-submit"]');
-    await page.waitForSelector('[data-testid="tutorial-banner"]', { timeout: 5000 });
-
-    await page.click('[data-testid="tab-battle"]');
-    await page.screenshot({
-      path: path.join(SCREENSHOT_DIR, "01-desktop-widescreen-tutorial.png"),
+    await p1Page.screenshot({
+      path: path.join(MVP_DIR, "03-modal-roster-30-heroes.png"),
       fullPage: true,
     });
 
-    const coinsBeforeTutorial = await page.evaluate(
+    await p1Page.click('[data-testid="roster-card-ashbomber"]');
+    const passiveSkillText = await p1Page.textContent('[data-testid="inspector-skill-box"]');
+    if (!passiveSkillText?.includes("PASSIVE ROLE")) {
+      throw new Error(`Expected clicking COMMON ashbomber card to show PASSIVE ROLE in inspector, got: ${passiveSkillText}`);
+    }
+    await p1Page.screenshot({
+      path: path.join(AUDIT_DIR, "03-persona1-roster-skill-inspector-passive.png"),
+      fullPage: true,
+    });
+    await p1Page.click('[data-testid="btn-close-modal"]');
+    await p1Context.close();
+
+    // =========================================================================
+    // PERSONA 2: Power / Competitive Player (Auto Wave + 4x Speed + Hotkeys)
+    // =========================================================================
+    const p2Context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+    const p2Page = await p2Context.newPage();
+    p2Page.on("console", (m) => {
+      if (m.type() === "error") consoleErrors.push(`[P2] ${m.text()}`);
+    });
+    await p2Page.goto(BASE_URL, { waitUntil: "networkidle", timeout: 15000 });
+    await p2Page.waitForFunction(() => Boolean(window.__TD_APP__), { timeout: 10000 });
+    await p2Page.keyboard.press("Escape");
+
+    await p2Page.keyboard.press("1");
+    await p2Page.click('[data-testid="ground-tile-0"]');
+    await p2Page.click('[data-testid="btn-deploy-on-tile"]');
+
+    await p2Page.keyboard.press("2");
+    await p2Page.click('[data-testid="ground-tile-1"]');
+    await p2Page.click('[data-testid="btn-deploy-on-tile"]');
+
+    await p2Page.keyboard.press("3");
+    await p2Page.click('[data-testid="hg-tile-0"]');
+    await p2Page.click('[data-testid="btn-deploy-on-tile"]');
+
+    await p2Page.click('[data-testid="btn-speed"]');
+    await p2Page.click('[data-testid="btn-speed"]');
+    await p2Page.click('[data-testid="btn-auto-wave"]');
+    await p2Page.waitForTimeout(900);
+
+    await p2Page.keyboard.press("q");
+    await p2Page.waitForTimeout(300);
+    await p2Page.screenshot({
+      path: path.join(AUDIT_DIR, "04-persona2-power-autowave-4x.png"),
+      fullPage: true,
+    });
+    await p2Context.close();
+
+    // =========================================================================
+    // PERSONA 3: Adversarial / Breaker & Login/Logout Security Tester
+    // =========================================================================
+    const p3Context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+    const p3Page = await p3Context.newPage();
+    let xssTriggered = false;
+    p3Page.on("dialog", async (d) => {
+      xssTriggered = true;
+      await d.dismiss();
+    });
+    p3Page.on("console", (m) => {
+      if (m.type() === "error") consoleErrors.push(`[P3] ${m.text()}`);
+    });
+
+    await p3Page.goto(BASE_URL, { waitUntil: "networkidle", timeout: 15000 });
+    await p3Page.waitForFunction(() => Boolean(window.__TD_APP__), { timeout: 10000 });
+    await p3Page.click('[data-testid="btn-tutorial-claim"]');
+
+    // Check Account modal when logged in: ONLY current account summary + Logout button
+    await p3Page.click('[data-testid="btn-modal-account"]');
+    await p3Page.waitForSelector('[data-testid="current-account-summary"]', { timeout: 5000 });
+    const loginInputsWhenLoggedIn = await p3Page.locator('[data-testid="input-username"]').count();
+    const logoutBtnWhenLoggedIn = await p3Page.locator('[data-testid="btn-logout"]').count();
+    if (loginInputsWhenLoggedIn !== 0 || logoutBtnWhenLoggedIn !== 1) {
+      throw new Error(
+        `When logged in, expected 0 login inputs and 1 logout button, got inputs=${loginInputsWhenLoggedIn}, logout=${logoutBtnWhenLoggedIn}`
+      );
+    }
+    await p3Page.screenshot({
+      path: path.join(AUDIT_DIR, "05-persona3-account-logged-in-only.png"),
+      fullPage: true,
+    });
+
+    // Click Logout -> verify switched to Login/Register form and locked out of game until logged in
+    await p3Page.click('[data-testid="btn-logout"]');
+    await p3Page.waitForSelector('[data-testid="input-username"]', { timeout: 5000 });
+    const logoutBtnAfterLogout = await p3Page.locator('[data-testid="btn-logout"]').count();
+    const summaryAfterLogout = await p3Page.locator('[data-testid="current-account-summary"]').count();
+    if (logoutBtnAfterLogout !== 0 || summaryAfterLogout !== 0) {
+      throw new Error("After logout, expected current-account-summary and btn-logout to be hidden");
+    }
+    await p3Page.screenshot({
+      path: path.join(AUDIT_DIR, "06-persona3-account-logged-out-form.png"),
+      fullPage: true,
+    });
+
+    // Register account with Thai + XSS string
+    await p3Page.fill('[data-testid="input-username"]', "เทพธาตุ_<script>alert(1)</script>");
+    await p3Page.fill('[data-testid="input-password"]', "pass999");
+    await p3Page.click('[data-testid="btn-auth-submit"]');
+    await p3Page.waitForSelector('[data-testid="modal-tutorial"]', { timeout: 5000 });
+    await p3Page.click('[data-testid="btn-tutorial-claim"]');
+
+    if (xssTriggered) {
+      throw new Error("XSS payload executed in username!");
+    }
+
+    // Logout and test wrong password rejection
+    await p3Page.click('[data-testid="btn-modal-account"]');
+    await p3Page.click('[data-testid="btn-logout"]');
+    await p3Page.fill('[data-testid="input-username"]', "เทพธาตุ_<script>alert(1)</script>");
+    await p3Page.fill('[data-testid="input-password"]', "wrong_pass");
+    await p3Page.click('[data-testid="btn-auth-submit"]');
+    const isAuthAfterWrongPass = await p3Page.evaluate(
+      () => window.__TD_APP__!.getSnapshot().isAuthenticated
+    );
+    if (isAuthAfterWrongPass) {
+      throw new Error("Expected wrong password login attempt to remain unauthenticated");
+    }
+
+    // Login with correct password -> verify 600 Meta Coins preserved
+    await p3Page.fill('[data-testid="input-password"]', "pass999");
+    await p3Page.click('[data-testid="btn-auth-submit"]');
+    const snapAfterReLogin = await p3Page.evaluate(() => window.__TD_APP__!.getSnapshot());
+    if (!snapAfterReLogin.isAuthenticated || snapAfterReLogin.profile.metaCoins !== 600) {
+      throw new Error(
+        `Expected re-login to restore 600 Meta Coins, got auth=${snapAfterReLogin.isAuthenticated}, coins=${snapAfterReLogin.profile.metaCoins}`
+      );
+    }
+
+    // Rage-click Gacha 10 times
+    await p3Page.click('[data-testid="btn-modal-gacha"]');
+    for (let i = 0; i < 10; i++) {
+      await p3Page.click('[data-testid="btn-pull-gacha"]');
+    }
+    const coinsAfterRage = await p3Page.evaluate(
       () => window.__TD_APP__!.getSnapshot().profile.metaCoins
     );
-    await page.click('[data-testid="btn-tutorial-skip"]');
-    const coinsAfterTutorial = await page.evaluate(
-      () => window.__TD_APP__!.getSnapshot().profile.metaCoins
-    );
-    if (coinsAfterTutorial !== coinsBeforeTutorial + 200) {
-      throw new Error(
-        `Expected +200 tutorial completion bonus (${coinsBeforeTutorial} -> ${coinsAfterTutorial})`
-      );
+    if (coinsAfterRage < 0) {
+      throw new Error(`Coins went negative after rage-clicking Gacha: ${coinsAfterRage}`);
     }
+    await p3Context.close();
 
-    await page.click('[data-testid="tab-roster"]');
-    await page.waitForSelector('[data-testid="btn-pull-gacha"]', { timeout: 5000 });
-    await page.click('[data-testid="btn-pull-gacha"]');
-    await page.waitForSelector('[data-testid="gacha-result-banner"]', { timeout: 5000 });
-    await page.screenshot({
-      path: path.join(SCREENSHOT_DIR, "02-gacha-4tier-and-roster.png"),
-      fullPage: true,
-    });
-
-    await page.click('[data-testid="tab-stages"]');
-    await page.waitForSelector('[data-testid="drawer-stages"]', { timeout: 5000 });
-
-    const stage2EasyLockedBefore = await page.isDisabled('[data-testid="btn-stage-2-EASY"]');
-    const stage1MedLockedBefore = await page.isDisabled('[data-testid="btn-stage-1-MEDIUM"]');
-    if (!stage2EasyLockedBefore || !stage1MedLockedBefore) {
-      throw new Error("Expected Stage 1 MEDIUM and Stage 2 EASY to start locked for new account");
-    }
-
-    await page.evaluate(() => {
-      window.__TD_APP__!.simulateStageClearForVerification(1, "EASY");
-    });
-
-    const stage2EasyLockedAfter = await page.isDisabled('[data-testid="btn-stage-2-EASY"]');
-    const stage1MedLockedAfter = await page.isDisabled('[data-testid="btn-stage-1-MEDIUM"]');
-    if (stage2EasyLockedAfter || stage1MedLockedAfter) {
-      throw new Error(
-        "Clearing Stage 1 EASY must unlock both Stage 1 MEDIUM and Stage 2 EASY"
-      );
-    }
-
-    await page.screenshot({
-      path: path.join(SCREENSHOT_DIR, "03-stages-cross-unlock-tree.png"),
-      fullPage: true,
-    });
-
-    await page.click('[data-testid="btn-stage-2-EASY"]');
-    await page.waitForSelector('[data-testid="btn-deploy-on-tile"]', { timeout: 5000 });
-
-    await page.click('[data-testid="select-hero-archer"]');
-    await page.click('[data-testid="ground-tile-0"]');
-    await page.click('[data-testid="btn-deploy-on-tile"]');
-
-    await page.click('[data-testid="select-hero-pyromancer"]');
-    await page.click('[data-testid="ground-tile-1"]');
-    await page.click('[data-testid="btn-deploy-on-tile"]');
-
-    const flameSynergyText = await page.textContent('[data-testid="synergy-pill-FLAME"]');
-    if (!flameSynergyText?.includes("ACTIVE")) {
-      throw new Error(
-        `Expected deploying 2 FLAME heroes to activate FLAME synergy, got: ${flameSynergyText}`
-      );
-    }
-
-    await page.click('[data-testid="select-hero-frostmage"]');
-    await page.click('[data-testid="hg-tile-0"]');
-    await page.click('[data-testid="btn-deploy-on-tile"]');
-
-    const startWaveBtnBox = await page.locator('[data-testid="btn-start-wave"]').boundingBox();
-    if (!startWaveBtnBox) {
-      throw new Error("Start wave button boundingBox not found");
-    }
-    await page.mouse.move(
-      startWaveBtnBox.x + startWaveBtnBox.width / 2,
-      startWaveBtnBox.y + startWaveBtnBox.height / 2
-    );
-    await page.mouse.down();
-    await page.waitForTimeout(130);
-    await page.mouse.up();
-    await page.waitForTimeout(1900);
-
-    const skillCastOk = await page.evaluate(() => {
-      return window.__TD_APP__!.castSkillForHeroType("archer");
-    });
-    if (!skillCastOk) {
-      throw new Error("Expected Archer Active Skill (Arrow Volley) to cast once ready");
-    }
-
-    await page.waitForTimeout(350);
-    await page.screenshot({
-      path: path.join(SCREENSHOT_DIR, "04-stage2-synergy-and-skill.png"),
-      fullPage: true,
-    });
-
-    await page.click('[data-testid="tab-leaderboard"]');
-    await page.waitForSelector('[data-testid="btn-record-run"]', { timeout: 5000 });
-    await page.click('[data-testid="btn-record-run"]');
-    const lbText = await page.textContent('[data-testid="leaderboard-list"]');
-    if (!lbText?.includes("RiftTactician")) {
-      throw new Error("Expected logged-in account 'RiftTactician' on Leaderboard");
-    }
-
-    const mobileContext = await browser.newContext({
+    // =========================================================================
+    // PERSONA 4: Mobile Touch User (390x844 Portrait & 844x390 Landscape)
+    // =========================================================================
+    const p4Context = await browser.newContext({
       viewport: { width: 390, height: 844 },
       isMobile: true,
       hasTouch: true,
     });
-    const mobilePage = await mobileContext.newPage();
-    await mobilePage.goto(BASE_URL, { waitUntil: "networkidle", timeout: 15000 });
-    await mobilePage.waitForFunction(() => Boolean(window.__TD_APP__), { timeout: 10000 });
-    await mobilePage.screenshot({
-      path: path.join(SCREENSHOT_DIR, "05-mobile-responsive.png"),
-      fullPage: true,
-    });
-    await mobileContext.close();
+    const p4Page = await p4Context.newPage();
+    await p4Page.goto(BASE_URL, { waitUntil: "networkidle", timeout: 15000 });
+    await p4Page.waitForFunction(() => Boolean(window.__TD_APP__), { timeout: 10000 });
+    await p4Page.click('[data-testid="btn-tutorial-claim"]');
 
-    if (consoleErrors.length > 0) {
-      throw new Error(`Browser console/page errors detected:\n${consoleErrors.join("\n")}`);
+    const hasHorizontalOverflow = await p4Page.evaluate(() => {
+      return document.documentElement.scrollWidth > window.innerWidth + 2;
+    });
+    if (hasHorizontalOverflow) {
+      throw new Error("Mobile viewport 390x844 has unexpected horizontal page overflow");
     }
 
-    console.log("BROWSER VERIFICATION PASSED");
-    console.log("- Account registration & 4-step first-time tutorial (+200 Coins) verified");
-    console.log("- 10-Stage cross-progression unlock (Stage 1 Easy -> Stage 1 Medium + Stage 2 Easy) verified");
-    console.log("- Stage 2 distinct map & FLAME 2/2 Elemental Synergy ACTIVE verified");
-    console.log("- Desktop Widescreen (1920x1080) & Mobile Responsive (390x844) screenshots captured");
-    console.log(`- Console Errors: ${consoleErrors.length}`);
+    const mapBox = await p4Page.locator("#phaser-mount").boundingBox();
+    const deployBtnBox = await p4Page.locator('[data-testid="btn-deploy-on-tile"]').boundingBox();
+    const bottomDockBox = await p4Page.locator("#hud-bottom").boundingBox();
+    if (!mapBox || !deployBtnBox || !bottomDockBox) {
+      throw new Error("Mobile battle screen elements missing boundingBox");
+    }
+    if (
+      mapBox.y < 0 ||
+      mapBox.y + mapBox.height > 845 ||
+      deployBtnBox.y + deployBtnBox.height > 845 ||
+      bottomDockBox.y + bottomDockBox.height > 845
+    ) {
+      throw new Error(
+        `Mobile 390x844 Zero-Scroll check failed: mapBottom=${mapBox.y + mapBox.height}, deployBottom=${deployBtnBox.y + deployBtnBox.height}, dockBottom=${bottomDockBox.y + bottomDockBox.height} (expected all <= 845)`
+      );
+    }
+
+    await p4Page.click('[data-testid="select-hero-pyromancer"]');
+    await p4Page.click('[data-testid="btn-deploy-on-tile"]');
+    await p4Page.click('[data-testid="btn-auto-wave"]');
+    await p4Page.waitForTimeout(400);
+
+    await p4Page.screenshot({
+      path: path.join(AUDIT_DIR, "08-mobile-portrait-zero-scroll-battle.png"),
+      fullPage: false,
+    });
+
+    await p4Page.click('[data-testid="btn-modal-roster"]');
+    await p4Page.waitForSelector('[data-testid="roster-hero-inspector"]', { timeout: 5000 });
+    await p4Page.click('[data-testid="roster-card-chronoweaver"]');
+    await p4Page.screenshot({
+      path: path.join(AUDIT_DIR, "07-persona4-mobile-roster-inspector.png"),
+      fullPage: false,
+    });
+    await p4Page.click('[data-testid="btn-close-modal"]');
+
+    await p4Page.setViewportSize({ width: 844, height: 390 });
+    await p4Page.waitForTimeout(300);
+    await p4Page.screenshot({
+      path: path.join(AUDIT_DIR, "09-mobile-landscape-battle.png"),
+      fullPage: false,
+    });
+    await p4Context.close();
+
+    if (consoleErrors.length > 0) {
+      throw new Error(`Console errors detected:\n${consoleErrors.join("\n")}`);
+    }
+
+    console.log("MULTI-PERSONA AUDIT & BROWSER VERIFICATION PASSED (4/4 Personas)");
   } finally {
     await browser.close();
     if (serverProc && serverProc.pid) {
@@ -216,7 +313,7 @@ async function runVerification(): Promise<void> {
   }
 }
 
-runVerification().catch((err) => {
-  console.error("BROWSER VERIFICATION FAILED:", err);
+runPersonaAudit().catch((err) => {
+  console.error("PERSONA AUDIT FAILED:", err);
   process.exit(1);
 });

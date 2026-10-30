@@ -228,7 +228,8 @@ export class BattleScene extends Phaser.Scene {
           .setDepth(12);
         this.heroLabels.set(hero.instanceId, lbl);
       }
-      const skillReady = state.tick >= hero.skillReadyAtTick;
+      const hasSkill = def.skillEffect !== null;
+      const skillReady = hasSkill && state.tick >= hero.skillReadyAtTick;
       const isSilenced = state.tick < hero.silencedUntilTick;
       lbl.setPosition(hero.x - 16, hero.y + 8);
       lbl.setText(

@@ -59,6 +59,15 @@ export function applyStageVictoryUnlocks(
 }
 
 export function createDefaultProfile(username = "Commander"): PlayerProfile {
+  const initialOwned: Record<HeroId, number> = {} as Record<HeroId, number>;
+  for (const id of ALL_HERO_IDS) {
+    initialOwned[id] = 0;
+  }
+  initialOwned.archer = 1;
+  initialOwned.frostarcher = 1;
+  initialOwned.pyromancer = 1;
+  initialOwned.frostmage = 1;
+
   return {
     username,
     tutorialCompleted: false,
@@ -72,16 +81,7 @@ export function createDefaultProfile(username = "Commander"): PlayerProfile {
     unlockedStageDifficulties: {
       "1:EASY": true,
     },
-    ownedHeroes: {
-      archer: 1,
-      frostarcher: 1,
-      pyromancer: 1,
-      stormcaller: 0,
-      frostmage: 1,
-      thunderlord: 0,
-      paladin: 0,
-      chronoweaver: 0,
-    },
+    ownedHeroes: initialOwned,
     loadout: ["archer", "pyromancer", "frostmage"],
     leaderboard: [
       {

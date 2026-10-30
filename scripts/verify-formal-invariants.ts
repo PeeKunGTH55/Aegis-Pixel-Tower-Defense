@@ -55,14 +55,13 @@ function assertRejection(
   expectedReason: CommandRejectionReason,
   message: string
 ): void {
-  if (!res.ok) {
-    if (res.reason !== expectedReason) {
-      throw new Error(
-        `INVARIANT VIOLATION: ${message}: expected reason "${expectedReason}", got "${res.reason}"`
-      );
-    }
-  } else {
+  if (res.ok) {
     throw new Error(`INVARIANT VIOLATION: ${message}: expected rejection but command succeeded`);
+  }
+  if (res.reason !== expectedReason) {
+    throw new Error(
+      `INVARIANT VIOLATION: ${message}: expected reason "${expectedReason}", got "${res.reason}"`
+    );
   }
 }
 
@@ -117,8 +116,46 @@ function runFormalSuite(injectFault: boolean): void {
   const t0 = performance.now();
 
   // =========================================================================
-  // Invariant 1: Loadout Cap (<= 6) & Account Tutorial Idempotency (+200 coins)
+  // Invariant 1: 30-Hero Distribution, Loadout Cap (<= 6) & Account Tutorial Idempotency
   // =========================================================================
+  assert(ALL_HERO_IDS.length === 30, `Expected exactly 30 heroes in ALL_HERO_IDS, got ${ALL_HERO_IDS.length}`);
+  const uniqueHeroIds = new Set(ALL_HERO_IDS);
+  assert(uniqueHeroIds.size === 30, "Duplicate hero IDs found in ALL_HERO_IDS");
+
+  const rarityCounts: Record<HeroRarity, number> = {
+    COMMON: 0,
+    UNCOMMON: 0,
+    RARE: 0,
+    ULTRA_RARE: 0,
+  };
+
+  for (const heroId of ALL_HERO_IDS) {
+    const def = HERO_CATALOG[heroId];
+    assert(Boolean(def), `Hero definition missing for ${heroId}`);
+    assert(def.id === heroId, `Hero definition ID mismatch for ${heroId}`);
+    rarityCounts[def.rarity]++;
+
+    if (def.rarity === "COMMON" || def.rarity === "UNCOMMON") {
+      assert(def.skillEffect === null, `Passive hero ${heroId} (${def.rarity}) must have skillEffect === null`);
+      assert(def.skillName === null, `Passive hero ${heroId} (${def.rarity}) must have skillName === null`);
+      assert(def.skillDescThai === null, `Passive hero ${heroId} (${def.rarity}) must have skillDescThai === null`);
+      assert(def.skillCooldownTicks === 0, `Passive hero ${heroId} (${def.rarity}) must have skillCooldownTicks === 0`);
+    } else {
+      assert(def.skillEffect !== null, `Active hero ${heroId} (${def.rarity}) must have skillEffect !== null`);
+      assert(def.skillName !== null, `Active hero ${heroId} (${def.rarity}) must have skillName !== null`);
+      assert(def.skillDescThai !== null, `Active hero ${heroId} (${def.rarity}) must have skillDescThai !== null`);
+      assert(def.skillCooldownTicks > 0, `Active hero ${heroId} (${def.rarity}) must have skillCooldownTicks > 0`);
+    }
+    totalSamples += 5;
+  }
+
+  assert(rarityCounts.COMMON === 10, `Expected exactly 10 COMMON heroes, got ${rarityCounts.COMMON}`);
+  assert(rarityCounts.UNCOMMON === 9, `Expected exactly 9 UNCOMMON heroes, got ${rarityCounts.UNCOMMON}`);
+  assert(rarityCounts.RARE === 7, `Expected exactly 7 RARE heroes, got ${rarityCounts.RARE}`);
+  assert(rarityCounts.ULTRA_RARE === 4, `Expected exactly 4 ULTRA_RARE heroes, got ${rarityCounts.ULTRA_RARE}`);
+  totalSamples += 5;
+
+  // Loadout slots bounds [2, 6]
   for (let lvl = -5; lvl <= 20; lvl++) {
     const cap = getUnlockedLoadoutSlots(lvl);
     assert(cap >= 2 && cap <= MAX_LOADOUT_SLOTS, `Invalid slot cap ${cap} for level ${lvl}`);
@@ -150,22 +187,18 @@ function runFormalSuite(injectFault: boolean): void {
     totalSamples++;
   }
 
-  // Loadout toggle bounds fuzzing
+  // Loadout toggle bounds fuzzing across all 30 heroes
+  const allOwnedRecord: Record<HeroId, number> = {} as Record<HeroId, number>;
+  for (const id of ALL_HERO_IDS) {
+    allOwnedRecord[id] = 1;
+  }
+
   for (let lvl = 1; lvl <= 10; lvl++) {
     const cap = getUnlockedLoadoutSlots(lvl);
     let prof = {
       ...createDefaultProfile(),
       playerLevel: lvl,
-      ownedHeroes: {
-        archer: 1,
-        frostarcher: 1,
-        pyromancer: 1,
-        stormcaller: 1,
-        frostmage: 1,
-        thunderlord: 1,
-        paladin: 1,
-        chronoweaver: 1,
-      },
+      ownedHeroes: allOwnedRecord,
       loadout: ["archer"] as readonly HeroId[],
     };
     for (const id of ALL_HERO_IDS) {
@@ -181,7 +214,7 @@ function runFormalSuite(injectFault: boolean): void {
   }
 
   // =========================================================================
-  // Invariant 2: 4-Tier Rarity Deploy Caps (COMMON:6, UNCOMMON:4, RARE:2, ULTRA_RARE:1)
+  // Invariant 2: 4-Tier Rarity Deploy Caps 6/4/2/1 across all 30 Heroes
   // =========================================================================
   const expectedCaps: Record<HeroRarity, number> = {
     COMMON: 6,
@@ -228,7 +261,7 @@ function runFormalSuite(injectFault: boolean): void {
       totalSamples++;
     }
 
-    // Deploy overflow attempt must be rejected
+    // Deploy overflow attempt ((maxDeployCount + 1)-th deploy) must be rejected with DEPLOY_CAP_REACHED
     const overflowTile = validTiles[def.maxDeployCount]!;
     const overflowRes = applyCommand(st, {
       kind: "DEPLOY",
@@ -337,8 +370,10 @@ function runFormalSuite(injectFault: boolean): void {
   }
 
   // =========================================================================
-  // Invariant 4: Cross-Progression Difficulty Unlock Tree & Elemental Synergy
+  // Invariant 4: Passive Hero HERO_HAS_NO_SKILL Guard, Active Skill Cooldown/Silence Guard,
+  //             Cross-Progression Unlocks & Elemental Synergy
   // =========================================================================
+
   // 1. applyStageVictoryUnlocks rules
   for (let n = 1; n <= 10; n++) {
     const easyUnlock = applyStageVictoryUnlocks({}, n, "EASY");
@@ -394,7 +429,8 @@ function runFormalSuite(injectFault: boolean): void {
   totalSamples += 5;
 
   // SOLAR Synergy (2+ SOLAR units -> +20% all heroes damage)
-  const solarSyn = computeActiveSynergies([{ heroId: "paladin" }, { heroId: "chronoweaver" }]);
+  // Paladin (SOLAR) + Solariseraph (SOLAR)
+  const solarSyn = computeActiveSynergies([{ heroId: "paladin" }, { heroId: "solariseraph" }]);
   const solarBonus = solarSyn.find((s) => s.element === "SOLAR")!;
   assert(solarBonus.active && solarBonus.deployedUnits === 2, "2 SOLAR units must activate SOLAR synergy");
   const frostArcherDmgSolar = getHeroEffectiveDamage(makeDummyHero("frostarcher"), solarSyn);
@@ -403,11 +439,12 @@ function runFormalSuite(injectFault: boolean): void {
   totalSamples += 3;
 
   // STORM Synergy (2+ STORM units -> -20% cooldown)
-  const stormSyn = computeActiveSynergies([{ heroId: "stormcaller" }, { heroId: "thunderlord" }]);
+  // Thunderlord (STORM) + Tempestarchon (STORM)
+  const stormSyn = computeActiveSynergies([{ heroId: "thunderlord" }, { heroId: "tempestarchon" }]);
   const stormBonus = stormSyn.find((s) => s.element === "STORM")!;
   assert(stormBonus.active && stormBonus.deployedUnits === 2, "2 STORM units must activate STORM synergy");
-  const baseStormCd = getHeroSkillCooldownTicks("stormcaller", 1, emptySyn);
-  const buffedStormCd = getHeroSkillCooldownTicks("stormcaller", 1, stormSyn);
+  const baseStormCd = getHeroSkillCooldownTicks("thunderlord", 1, emptySyn);
+  const buffedStormCd = getHeroSkillCooldownTicks("thunderlord", 1, stormSyn);
   assert(buffedStormCd < baseStormCd, "STORM synergy must decrease hero skill cooldown ticks");
   totalSamples += 3;
 
@@ -417,52 +454,181 @@ function runFormalSuite(injectFault: boolean): void {
   assert(frostBonusObj.active && frostBonusObj.deployedUnits === 2, "2 FROST units must activate FROST synergy");
   totalSamples++;
 
-  // Active skill cooldown guard and Paladin silence cleanse
-  let skillState = {
-    ...createInitialBattleState({
-      seed: 202610,
-      stageId: 1,
-      mode: "STAGE",
-      playerLevel: 5,
-      loadout: ["paladin", "archer"],
-      heroStars: { paladin: 1, archer: 1 } as any,
-    }),
-    gold: 999999,
-  };
-  const palTile = getValidTilesForHero(1, "paladin")[0]!;
-  const archTile = getValidTilesForHero(1, "archer")[1]!;
-  skillState = applyCommand(skillState, { kind: "DEPLOY", tick: 0, heroId: "paladin", col: palTile.col, row: palTile.row }).state;
-  skillState = applyCommand(skillState, { kind: "DEPLOY", tick: 0, heroId: "archer", col: archTile.col, row: archTile.row }).state;
-
-  const cdRes = applyCommand(skillState, { kind: "CAST_SKILL", tick: 0, instanceId: 1 });
-  assertRejection(cdRes, "SKILL_ON_COOLDOWN", "Skill cooldown check at tick 0");
-  totalSamples++;
-
-  const silencedState: BattleState = {
-    ...skillState,
-    tick: 50,
-    deployedHeroes: skillState.deployedHeroes.map((h) => ({ ...h, silencedUntilTick: 90 })),
-  };
-  const archCast = applyCommand(silencedState, { kind: "CAST_SKILL", tick: 50, instanceId: 2 });
-  assertRejection(archCast, "HERO_SILENCED", "Silenced archer cast check");
-  const palCast = applyCommand(silencedState, { kind: "CAST_SKILL", tick: 50, instanceId: 1 });
-  assert(palCast.ok, "Expected Paladin Sanctuary Cleanse to break silence");
-  assert(
-    palCast.state.deployedHeroes.every((h) => h.silencedUntilTick === 0),
-    "Expected all heroes to be cleansed of silence"
+  // 3. Passive Hero HERO_HAS_NO_SKILL Guard (10 COMMON + 9 UNCOMMON = 19 heroes)
+  const passiveHeroes = ALL_HERO_IDS.filter(
+    (id) => HERO_CATALOG[id].rarity === "COMMON" || HERO_CATALOG[id].rarity === "UNCOMMON"
   );
-  assert(
-    palCast.state.deployedHeroes[0]!.skillReadyAtTick === 50 + getHeroSkillCooldownTicks("paladin", 1, palCast.state.activeSynergies),
-    "Expected Paladin cooldown set properly"
+  assert(passiveHeroes.length === 19, `Expected 19 passive heroes, got ${passiveHeroes.length}`);
+
+  for (const passiveId of passiveHeroes) {
+    const tile = getValidTilesForHero(1, passiveId)[0]!;
+    let st = {
+      ...createInitialBattleState({
+        seed: 202610,
+        stageId: 1,
+        mode: "STAGE",
+        playerLevel: 5,
+        loadout: [passiveId],
+        heroStars: { [passiveId]: 1 } as any,
+      }),
+      gold: 999999,
+    };
+
+    const dep = applyCommand(st, {
+      kind: "DEPLOY",
+      tick: 0,
+      heroId: passiveId,
+      col: tile.col,
+      row: tile.row,
+    });
+    assert(dep.ok, `Deploy must succeed for passive hero ${passiveId}`);
+    st = dep.state;
+    const heroInstance = st.deployedHeroes[0]!;
+
+    // Advance tick past 100
+    st = { ...st, tick: 120 };
+
+    // CAST_SKILL on passive hero must reject with HERO_HAS_NO_SKILL
+    const castRes = applyCommand(st, {
+      kind: "CAST_SKILL",
+      tick: 120,
+      instanceId: heroInstance.instanceId,
+    });
+    assertRejection(
+      castRes,
+      "HERO_HAS_NO_SKILL",
+      `Passive hero ${passiveId} (${HERO_CATALOG[passiveId].rarity}) must reject CAST_SKILL with HERO_HAS_NO_SKILL`
+    );
+    totalSamples += 3;
+  }
+
+  // 4. Active Hero Cooldown, Silence Guard, & Sanctuary Cleanse (7 RARE + 4 ULTRA_RARE = 11 heroes)
+  const activeHeroes = ALL_HERO_IDS.filter(
+    (id) => HERO_CATALOG[id].rarity === "RARE" || HERO_CATALOG[id].rarity === "ULTRA_RARE"
   );
-  totalSamples += 4;
+  assert(activeHeroes.length === 11, `Expected 11 active heroes, got ${activeHeroes.length}`);
+
+  for (const activeId of activeHeroes) {
+    const def = HERO_CATALOG[activeId];
+    const heroTile = getValidTilesForHero(1, activeId)[0]!;
+    // Place a bystander hero on ground to verify cleanse affects all towers
+    const bystanderTile = getValidTilesForHero(1, "archer").find(
+      (t) => !(t.col === heroTile.col && t.row === heroTile.row)
+    )!;
+
+    let st = {
+      ...createInitialBattleState({
+        seed: 202610,
+        stageId: 1,
+        mode: "STAGE",
+        playerLevel: 5,
+        loadout: [activeId, "archer"],
+        heroStars: { [activeId]: 1, archer: 1 } as any,
+      }),
+      gold: 999999,
+    };
+
+    const depActive = applyCommand(st, {
+      kind: "DEPLOY",
+      tick: 0,
+      heroId: activeId,
+      col: heroTile.col,
+      row: heroTile.row,
+    });
+    assert(depActive.ok, `Deploy failed for active hero ${activeId}`);
+    st = depActive.state;
+    const activeInstanceId = st.deployedHeroes.find((h) => h.heroId === activeId)!.instanceId;
+
+    const depBystander = applyCommand(st, {
+      kind: "DEPLOY",
+      tick: 0,
+      heroId: "archer",
+      col: bystanderTile.col,
+      row: bystanderTile.row,
+    });
+    assert(depBystander.ok, "Deploy failed for bystander archer");
+    st = depBystander.state;
+
+    // Check 1: SKILL_ON_COOLDOWN at tick 0
+    const cdRes = applyCommand(st, {
+      kind: "CAST_SKILL",
+      tick: 0,
+      instanceId: activeInstanceId,
+    });
+    assertRejection(cdRes, "SKILL_ON_COOLDOWN", `${activeId} CAST_SKILL at tick 0 must be on cooldown`);
+    totalSamples += 3;
+
+    // Advance to tick 50 (past initial cooldown of 30) and silence all heroes
+    const silencedState: BattleState = {
+      ...st,
+      tick: 50,
+      deployedHeroes: st.deployedHeroes.map((h) => ({ ...h, silencedUntilTick: 90 })),
+    };
+
+    const isCleanse = def.skillEffect?.kind === "SANCTUARY_CLEANSE";
+    const silencedCast = applyCommand(silencedState, {
+      kind: "CAST_SKILL",
+      tick: 50,
+      instanceId: activeInstanceId,
+    });
+
+    if (isCleanse) {
+      // SANCTUARY_CLEANSE heroes (paladin, solariseraph) must break silence and cleanse ALL towers
+      assert(
+        silencedCast.ok,
+        `SANCTUARY_CLEANSE hero ${activeId} must successfully cast skill even when silenced`
+      );
+      assert(
+        silencedCast.state.deployedHeroes.every((h) => h.silencedUntilTick === 0),
+        `SANCTUARY_CLEANSE hero ${activeId} must cleanse silence for ALL towers`
+      );
+      const expectedCd = getHeroSkillCooldownTicks(activeId, 1, silencedCast.state.activeSynergies);
+      const updatedCaster = silencedCast.state.deployedHeroes.find((h) => h.instanceId === activeInstanceId)!;
+      assert(
+        updatedCaster.skillReadyAtTick === 50 + expectedCd,
+        `SANCTUARY_CLEANSE hero ${activeId} cooldown must be set to tick + cooldown`
+      );
+      assert(updatedCaster.totalSkillCasts === 1, `${activeId} totalSkillCasts must increment to 1`);
+      totalSamples += 4;
+    } else {
+      // Non-cleanse heroes must reject with HERO_SILENCED
+      assertRejection(
+        silencedCast,
+        "HERO_SILENCED",
+        `Silenced active hero ${activeId} must reject CAST_SKILL with HERO_SILENCED`
+      );
+      totalSamples++;
+
+      // When ready and unsilenced (advance tick to 100, which is past silencedUntilTick 90 and skillReadyAtTick 30)
+      const unsilencedState: BattleState = {
+        ...st,
+        tick: 100,
+      };
+      const readyCast = applyCommand(unsilencedState, {
+        kind: "CAST_SKILL",
+        tick: 100,
+        instanceId: activeInstanceId,
+      });
+      assert(readyCast.ok, `Active hero ${activeId} must successfully cast skill when ready`);
+      const expectedCd = getHeroSkillCooldownTicks(activeId, 1, readyCast.state.activeSynergies);
+      const updatedCaster = readyCast.state.deployedHeroes.find((h) => h.instanceId === activeInstanceId)!;
+      assert(
+        updatedCaster.skillReadyAtTick === 100 + expectedCd,
+        `Active hero ${activeId} cooldown must be set to tick + cooldown`
+      );
+      assert(updatedCaster.totalSkillCasts === 1, `${activeId} totalSkillCasts must increment to 1`);
+      totalSamples += 3;
+    }
+  }
 
   // =========================================================================
-  // Invariant 5: 20-Pull ULTRA_RARE Guarantee & 10-Pull RARE+ Guarantee
+  // Invariant 5: 20-Pull ULTRA_RARE Guarantee & 10-Pull RARE+ Guarantee across the 30-Hero Pool
   // =========================================================================
   let gachaProf = { ...createDefaultProfile(), metaCoins: 1000 * GACHA_PULL_COST };
   let gachaSeed = 1337;
   let totalPulls = 0;
+  const pulledRarities = new Set<HeroRarity>();
+  const pulledHeroIds = new Set<HeroId>();
 
   while (totalPulls < 1000) {
     if (totalPulls % 20 < 10) {
@@ -471,6 +637,15 @@ function runFormalSuite(injectFault: boolean): void {
       const prevRarePity = gachaProf.rarePityCounter;
       const out = pullGachaWithSeed(gachaProf, gachaSeed);
       assert(out.ok && out.profile.metaCoins >= 0, "Gacha pull must succeed and metaCoins must be non-negative");
+      assert(Boolean(out.pulledHeroId), "Gacha pull must return a pulledHeroId");
+      assert(ALL_HERO_IDS.includes(out.pulledHeroId!), `Pulled hero ${out.pulledHeroId} not in 30-hero catalog`);
+      assert(
+        HERO_CATALOG[out.pulledHeroId!].rarity === out.pulledRarity,
+        `Pulled hero rarity mismatch for ${out.pulledHeroId}`
+      );
+      pulledRarities.add(out.pulledRarity!);
+      pulledHeroIds.add(out.pulledHeroId!);
+
       gachaSeed = out.nextRngSeed ?? gachaSeed + 997;
 
       if (prevUltraPity + 1 >= ULTRA_RARE_PITY_THRESHOLD) {
@@ -487,20 +662,34 @@ function runFormalSuite(injectFault: boolean): void {
       assert(gachaProf.pityCounter < ULTRA_RARE_PITY_THRESHOLD, `pityCounter must never reach 20 after pull (got ${gachaProf.pityCounter})`);
       assert(gachaProf.rarePityCounter < RARE_PITY_THRESHOLD, `rarePityCounter must never reach 10 after pull (got ${gachaProf.rarePityCounter})`);
       totalPulls++;
-      totalSamples++;
+      totalSamples += 3;
     } else {
       // 10-batch pull
       const outBatch = pullGachaBatchWithSeed(gachaProf, 10, gachaSeed);
       assert(outBatch.ok && outBatch.profile.metaCoins >= 0, "Batch pull must succeed and metaCoins must be non-negative");
+      for (const item of outBatch.results) {
+        assert(ALL_HERO_IDS.includes(item.heroId), `Batch pulled hero ${item.heroId} not in 30-hero catalog`);
+        assert(
+          HERO_CATALOG[item.heroId].rarity === item.rarity,
+          `Batch pulled hero rarity mismatch for ${item.heroId}`
+        );
+        pulledRarities.add(item.rarity);
+        pulledHeroIds.add(item.heroId);
+      }
+
       gachaSeed = gachaSeed + 10007;
       gachaProf = outBatch.profile;
 
       assert(gachaProf.pityCounter < ULTRA_RARE_PITY_THRESHOLD, "pityCounter exceeded 20 after batch pull");
       assert(gachaProf.rarePityCounter < RARE_PITY_THRESHOLD, "rarePityCounter exceeded 10 after batch pull");
       totalPulls += 10;
-      totalSamples += 10;
+      totalSamples += 12;
     }
   }
+
+  assert(pulledRarities.size === 4, "All 4 rarities must be pulled across 1,000 pulls");
+  assert(pulledHeroIds.size >= 25, `Expected diverse hero pulls across 30-hero pool (got ${pulledHeroIds.size})`);
+  totalSamples += 2;
 
   // Insufficient coin checks
   const brokeProf = { ...createDefaultProfile(), metaCoins: 50 };
@@ -513,29 +702,22 @@ function runFormalSuite(injectFault: boolean): void {
   // =========================================================================
   // Invariant 6: Bitwise Replay Determinism & Stage 10-Wave Victory
   // =========================================================================
+  const all5Stars = Object.fromEntries(ALL_HERO_IDS.map((id) => [id, 5])) as Record<HeroId, number>;
+
   const baseConfig: BattleConfig = {
     seed: 202610,
     stageId: 1,
     mode: "STAGE",
     playerLevel: 5,
     loadout: ["paladin", "chronoweaver", "thunderlord", "frostmage", "pyromancer", "archer"],
-    heroStars: {
-      archer: 5,
-      frostarcher: 5,
-      pyromancer: 5,
-      stormcaller: 5,
-      frostmage: 5,
-      thunderlord: 5,
-      paladin: 5,
-      chronoweaver: 5,
-    },
+    heroStars: all5Stars,
   };
 
   const replayCmds: GameCommand[] = [
-    { kind: "DEPLOY", tick: 0, heroId: "archer", col: 2, row: 3 },
+    { kind: "DEPLOY", tick: 0, heroId: "paladin", col: 5, row: 1 },
     { kind: "DEPLOY", tick: 0, heroId: "frostmage", col: 8, row: 2 },
     { kind: "START_WAVE", tick: 0 },
-    { kind: "CAST_SKILL", tick: 40, instanceId: 1 },
+    { kind: "CAST_SKILL", tick: 40, instanceId: 2 },
   ];
   const rep1 = replaySimulation(baseConfig, replayCmds, 180);
   const rep2 = replaySimulation(baseConfig, replayCmds, 180);

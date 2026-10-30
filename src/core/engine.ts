@@ -129,6 +129,9 @@ export function getHeroSkillCooldownTicks(
   synergies?: readonly ElementalSynergyBonus[]
 ): number {
   const def = HERO_CATALOG[heroId];
+  if (!def.skillEffect || def.skillCooldownTicks <= 0) {
+    return 0;
+  }
   const starReduction = Math.min(0.32, (Math.max(1, stars) - 1) * 0.08);
   const stormBonus =
     synergies && isSynergyActive(synergies, "STORM") ? 0.2 : 0;
@@ -429,6 +432,9 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
         return { ok: false, reason: "HERO_NOT_FOUND", state };
       }
       const def = HERO_CATALOG[caster.heroId];
+      if (!def.skillEffect || !def.skillName) {
+        return { ok: false, reason: "HERO_HAS_NO_SKILL", state };
+      }
       if (state.tick < caster.skillReadyAtTick) {
         return { ok: false, reason: "SKILL_ON_COOLDOWN", state };
       }
@@ -458,7 +464,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
       );
       const fxEvents: VisualFxEvent[] = [...state.recentEvents];
       let bonusDamageDealt = 0;
-
+      const skillLabel = def.skillName;
       const effect = def.skillEffect;
       switch (effect.kind) {
         case "ARROW_VOLLEY": {
@@ -480,7 +486,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
               toX: e.x,
               toY: e.y,
               color: def.palette.accent,
-              label: def.skillName,
+              label: skillLabel,
             });
             return { ...e, hp: e.hp - dealt };
           });
@@ -502,7 +508,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
             toX: centerX,
             toY: centerY,
             color: def.palette.primary,
-            label: def.skillName,
+            label: skillLabel,
           });
           updatedEnemies = updatedEnemies.map((e) => {
             const dist = Math.hypot(e.x - centerX, e.y - centerY);
@@ -531,7 +537,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
             toX: 360,
             toY: 234,
             color: def.palette.primary,
-            label: def.skillName,
+            label: skillLabel,
           });
           updatedEnemies = updatedEnemies.map((e) => {
             bonusDamageDealt += burstDmg;
@@ -560,7 +566,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
               toX: e.x,
               toY: e.y,
               color: def.palette.primary,
-              label: def.skillName,
+              label: skillLabel,
             });
             return {
               ...e,
@@ -579,7 +585,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
             toX: caster.x,
             toY: caster.y,
             color: def.palette.primary,
-            label: def.skillName,
+            label: skillLabel,
           });
           updatedHeroes = updatedHeroes.map((h) => ({
             ...h,
@@ -597,7 +603,7 @@ export function applyCommand(state: BattleState, command: GameCommand): CommandR
             toX: 360,
             toY: 234,
             color: def.palette.primary,
-            label: def.skillName,
+            label: skillLabel,
           });
           updatedEnemies = updatedEnemies.map((e) => {
             const nextDist = Math.max(0, e.pathDistancePx - effect.rewindProgress);

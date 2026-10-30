@@ -17,12 +17,34 @@ export type StageDifficulty = "EASY" | "MEDIUM" | "HARD";
 export type HeroId =
   | "archer"
   | "frostarcher"
+  | "sparkling"
+  | "sunacolyte"
+  | "cinderpike"
+  | "iceslinger"
+  | "cloudwatcher"
+  | "lightbearer"
+  | "ashbomber"
+  | "snowguard"
   | "pyromancer"
   | "stormcaller"
+  | "cryoknight"
+  | "solarmonk"
+  | "magmacannon"
+  | "icicleranger"
+  | "volthunter"
+  | "sunpriest"
+  | "blazeblade"
   | "frostmage"
   | "thunderlord"
+  | "flamewarden"
+  | "solarsniper"
+  | "blizzardwitch"
+  | "tempestarchon"
+  | "solariseraph"
   | "paladin"
-  | "chronoweaver";
+  | "chronoweaver"
+  | "vulcanlord"
+  | "borealqueen";
 
 export type ActiveSkillKind =
   | {
@@ -58,6 +80,16 @@ export type ActiveSkillKind =
       readonly globalHasteTicks: number;
     };
 
+export type SpriteArchetype =
+  | "BOW"
+  | "STAFF"
+  | "SPEAR"
+  | "SHIELD"
+  | "CANNON"
+  | "TOME"
+  | "HALBERD"
+  | "CROWN";
+
 export interface HeroDefinition {
   readonly id: HeroId;
   readonly name: string;
@@ -75,10 +107,11 @@ export interface HeroDefinition {
   readonly splashRadiusPx: number;
   readonly slowPercent: number;
   readonly slowTicks: number;
-  readonly skillName: string;
-  readonly skillDescThai: string;
+  readonly skillName: string | null;
+  readonly skillDescThai: string | null;
   readonly skillCooldownTicks: number;
-  readonly skillEffect: ActiveSkillKind;
+  readonly skillEffect: ActiveSkillKind | null;
+  readonly spriteArchetype: SpriteArchetype;
   readonly palette: {
     readonly primary: number;
     readonly secondary: number;
@@ -184,6 +217,7 @@ export type CommandRejectionReason =
   | "INSUFFICIENT_GOLD"
   | "HERO_NOT_FOUND"
   | "MAX_LEVEL_REACHED"
+  | "HERO_HAS_NO_SKILL"
   | "HERO_SILENCED"
   | "SKILL_ON_COOLDOWN"
   | "WAVE_ALREADY_ACTIVE";
